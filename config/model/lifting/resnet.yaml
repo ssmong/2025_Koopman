@@ -1,0 +1,7 @@
+_target_: src.models.components.block_resnet.ResNetBlock
+
+hidden_size: 256
+num_layers: 2
+use_norm: true
+activation: 
+  _target_: torch.nn.SiLU

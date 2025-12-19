@@ -1,0 +1,6 @@
+_recursive_: False
+
+defaults:
+  - data: attitude
+  - model: model_lti
+  - loss: default

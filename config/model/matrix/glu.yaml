@@ -1,0 +1,3 @@
+_target_: src.models.components.block_glu.GLUBlock
+hidden_dim: ${model.latent_dim}
+hidden_ratio: 2
