@@ -12,7 +12,7 @@ angle_indices: []
 quat_indices: [0, 1, 2, 3]
 
 num_sequences: 1000
-sequence_length: 1000
+sequence_len: 1000
 raw_dt: 0.1
 
 hist_dt: 0.1

@@ -5,13 +5,14 @@ import numpy as np
 from pathlib import Path
 import json
 import logging
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 
 log = logging.getLogger(__name__)
 
 class KoopmanDataset(Dataset):
     def __init__(
         self, 
+        # Dataset general
         name: str,
         data_root: str,
         raw_state_dim: int,
@@ -21,6 +22,7 @@ class KoopmanDataset(Dataset):
         control_key: str,
         angle_indices: List[int],
         quat_indices: List[int],
+        # File specific
         num_sequences: int,
         sequence_len: int,
         raw_dt: float,
@@ -28,6 +30,9 @@ class KoopmanDataset(Dataset):
         hist_len: int,
         pred_dt: float,
         pred_len: int,
+        split: str = "train",
+        train_ratio: float = 0.8,
+        val_ratio: float = 0.1,
         normalization: bool = True,
         stats_dir: str = "data/stats"
     ):
@@ -40,8 +45,10 @@ class KoopmanDataset(Dataset):
         self.control_dim = control_dim
         self.state_key = state_key
         self.control_key = control_key
-        self.angle_indices = angle_indices
-        self.quat_indices = quat_indices
+        
+        # indices config
+        self.angle_indices = set(angle_indices) # O(1) lookup
+        self.quat_indices = set(quat_indices)
 
         self.num_sequences = num_sequences
         self.sequence_len = sequence_len
@@ -52,228 +59,215 @@ class KoopmanDataset(Dataset):
         self.pred_dt = pred_dt
         self.pred_len = pred_len
 
+        self.split = split.lower()
+        self.train_ratio = train_ratio
+        self.val_ratio = val_ratio
+
         self.normalization = normalization
         self.stats_dir = Path(stats_dir)
         self.stats_dir.mkdir(parents=True, exist_ok=True)
         
-        # 1. Discovery & Loading
-        states, self.controls = self._load_data()
+        # 1. Load & Expand Features (Optimized)
+        self.states, self.controls, self.skip_norm_mask = self._load_and_process_data()
         
-        # 2. Feature Expansion
-        self.expanded_states, self.skip_norm_mask = self._expand_features(states)
-        self.current_state_dim = self.expanded_states[0].shape[-1]
-        log.info(f"State dim expanded from {self.raw_state_dim} to {self.current_state_dim}")
-        del states
+        self.current_state_dim = self.states[0].shape[-1]
+        log.info(f"State dim: {self.raw_state_dim} -> {self.current_state_dim} (Configured: {self.state_dim})")
         
         if self.state_dim != self.current_state_dim:
              raise ValueError(f"Config state_dim ({self.state_dim}) != Expanded dim ({self.current_state_dim})")
 
-        # 3. Stats & Caching
+        # 2. Setup Statistics (Vectorized)
+        self.mean = torch.zeros(self.current_state_dim)
+        self.std = torch.ones(self.current_state_dim)
+        self.ctrl_mean = torch.zeros(self.control_dim)
+        self.ctrl_std = torch.ones(self.control_dim)
+        
         if self.normalization:
-            self.stats = self._get_stats()
-            self._apply_normalization()
-            self._print_stats()
+            self._setup_stats()
+            if self.split == "train":
+                self._print_stats()
             
-        # 4. Indexing
+        # 3. Pre-compute Index Offsets (Crucial for __getitem__ speed)
         self.hist_stride = int(round(self.hist_dt / self.raw_dt))
         self.pred_stride = int(round(self.pred_dt / self.raw_dt))
         
-        if not np.isclose(self.hist_stride * self.raw_dt, self.hist_dt, atol=1e-5):
-            raise ValueError(f"hist_dt ({self.hist_dt}) must be a multiple of raw_dt ({self.raw_dt})")
-        if not np.isclose(self.pred_stride * self.raw_dt, self.pred_dt, atol=1e-5):
-            raise ValueError(f"pred_dt ({self.pred_dt}) must be a multiple of raw_dt ({self.raw_dt})")
-            
+        self._validate_strides()
+        
+        # Pre-calc offsets (relative to index k)
+        # History: [k - H*s, ..., k - s]
+        self.hist_offsets = torch.arange(-self.hist_len * self.hist_stride, 0, self.hist_stride, dtype=torch.long)
+        # Future State: [k + s, ..., k + P*s]
+        self.future_offsets = torch.arange(self.pred_stride, self.pred_len * self.pred_stride + 1, self.pred_stride, dtype=torch.long)
+        # Future Control: [k, ..., k + (P-1)*s] -> often u_k is applied to get x_{k+1}
+        self.u_future_offsets = torch.arange(0, self.pred_len * self.pred_stride, self.pred_stride, dtype=torch.long)
+
+        # 4. Build Index Map
         self.indices = self._build_index()
 
-    def _load_data(self) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
+    def _validate_strides(self):
+        if not np.isclose(self.hist_stride * self.raw_dt, self.hist_dt, atol=1e-5):
+            raise ValueError(f"hist_dt ({self.hist_dt}) must be multiple of raw_dt ({self.raw_dt})")
+        if not np.isclose(self.pred_stride * self.raw_dt, self.pred_dt, atol=1e-5):
+            raise ValueError(f"pred_dt ({self.pred_dt}) must be multiple of raw_dt ({self.raw_dt})")
+
+    def _load_and_process_data(self) -> Tuple[List[torch.Tensor], List[torch.Tensor], torch.Tensor]:
         filename = f"{self.name}_{self.num_sequences}_{self.sequence_len}_{self.raw_dt}.h5"
         file_path = self.data_root / filename
+        
         if not file_path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
 
-        log.info(f"Loading data from {file_path}")        
+        log.info(f"Loading and processing data from {file_path}")
+        
+        # 1. Define Mask Structure first
+        mask_list = []
+        for i in range(self.raw_state_dim):
+            if i in self.angle_indices:
+                mask_list.extend([True, True]) # sin, cos -> skip normalization? usually sin/cos are bounded [-1,1] so maybe yes.
+            elif i in self.quat_indices:
+                mask_list.append(True) # Quaternions -> skip norm
+            else:
+                mask_list.append(False)
+        skip_norm_mask = torch.tensor(mask_list, dtype=torch.bool)
+
         states_list, controls_list = [], []
         
         with h5py.File(file_path, 'r') as hf:
             if 'timeseries' not in hf:
-                raise ValueError(f"File {file_path} missing 'timeseries' group")
+                raise ValueError(f"Missing 'timeseries' group in {file_path}")
             
             ts_grp = hf['timeseries']
-            sorted_keys = sorted(ts_grp.keys(), key=lambda k: int(k) if k.isdigit() else k)
-
-            for seq_id in sorted_keys:
-                grp = ts_grp[seq_id]
-                try:
-                    s = torch.from_numpy(grp[self.state_key][:]).float()
-                    c = torch.from_numpy(grp[self.control_key][:]).float()
-                except KeyError:
-                    raise ValueError(f"Missing state/control keys in {file_path} (seq: {seq_id})")
-
-                if s.shape[-1] != self.raw_state_dim:
-                    raise ValueError(f"Dim mismatch in {file_path}: expected {self.raw_state_dim}, got {s.shape[-1]}")
-                
-                states_list.append(s)
-                controls_list.append(c)
-
-        log.info(f"Loaded {len(states_list)} sequences.")
-        return states_list, controls_list
-
-    def _expand_features(self, states_list: List[torch.Tensor]) -> Tuple[List[torch.Tensor], torch.Tensor]:
-        expanded_list = []
-        mask_list = []
-        
-        # Determine mask structure
-        for i in range(self.raw_state_dim):
-            if i in self.angle_indices:
-                mask_list.append(True) # cos
-                mask_list.append(True) # sin
+            all_keys = sorted(ts_grp.keys(), key=lambda k: int(k) if k.isdigit() else k)
+            total_seqs = len(all_keys)
+            
+            # Stable shuffle
+            rng = np.random.RandomState(seed=42)
+            rng.shuffle(all_keys)
+            
+            n_train = int(total_seqs * self.train_ratio)
+            n_val = int(total_seqs * self.val_ratio)
+            
+            if self.split == 'train':
+                target_keys = all_keys[:n_train]
+            elif self.split == 'val':
+                target_keys = all_keys[n_train : n_train + n_val]
+            elif self.split == 'test':
+                target_keys = all_keys[n_train + n_val :]
             else:
-                if i in self.quat_indices:
-                    mask_list.append(True)
-                else:
-                    mask_list.append(False)
-                    
-        skip_norm_mask = torch.tensor(mask_list, dtype=torch.bool)
-        
-        for s in states_list:
-            new_feats = []
-            for i in range(self.raw_state_dim):
-                col = s[..., i]
-                if i in self.angle_indices:
-                    new_feats.append(torch.cos(col))
-                    new_feats.append(torch.sin(col))
-                else:
-                    new_feats.append(col)
-            
-            expanded_s = torch.stack(new_feats, dim=-1)
-            expanded_list.append(expanded_s)
-            
-        return expanded_list, skip_norm_mask
+                raise ValueError(f"Unknown split: {self.split}")
 
-    def _get_stats(self) -> Dict[str, torch.Tensor]:
+            # Load and Expand immediately to save memory spikes
+            for seq_id in target_keys:
+                grp = ts_grp[seq_id]
+                
+                # Load Raw
+                s_raw = torch.from_numpy(grp[self.state_key][:]).float()
+                c_raw = torch.from_numpy(grp[self.control_key][:]).float()
+                
+                if s_raw.shape[-1] != self.raw_state_dim:
+                    raise ValueError(f"Seq {seq_id}: Dim mismatch {s_raw.shape[-1]} != {self.raw_state_dim}")
+
+                # Feature Expansion (Angle -> Cos/Sin)
+                # If angle_indices is empty, this loop is skipped or minimal overhead
+                if len(self.angle_indices) > 0:
+                    expanded_feats = []
+                    for i in range(self.raw_state_dim):
+                        col = s_raw[..., i]
+                        if i in self.angle_indices:
+                            expanded_feats.append(torch.cos(col))
+                            expanded_feats.append(torch.sin(col))
+                        else:
+                            expanded_feats.append(col)
+                    s_final = torch.stack(expanded_feats, dim=-1)
+                else:
+                    s_final = s_raw
+
+                states_list.append(s_final)
+                controls_list.append(c_raw)
+
+        log.info(f"Loaded {len(states_list)} sequences for split '{self.split}'.")
+        return states_list, controls_list, skip_norm_mask
+
+    def _setup_stats(self):
         stats_file = self.stats_dir / f"{self.name}_stats.json"
         
-        if stats_file.exists():
+        if self.split == 'train':
+            log.info("Computing stats (Vectorized)...")
+            stats_data = self._compute_stats_vectorized()
+            
+            # Save
+            serializable_stats = {k: v.tolist() for k, v in stats_data.items()}
+            with open(stats_file, 'w') as f:
+                json.dump(serializable_stats, f, indent=4)
+            log.info(f"Stats saved to {stats_file}")
+            
+        else:
+            if not stats_file.exists():
+                raise RuntimeError(f"Stats file missing: {stats_file}. Run 'train' split first.")
+            
             log.info(f"Loading stats from {stats_file}")
             with open(stats_file, 'r') as f:
                 data = json.load(f)
-            stats = {k: torch.tensor(v) for k, v in data.items()}
-            return stats
-            
-        log.info("Computing stats...")
-        
-        s_sum = 0
-        s_count = 0
-        s_min, s_max = None, None
+            stats_data = {k: torch.tensor(v) for k, v in data.items()}
 
-        c_sum = 0
-        c_count = 0
-        c_min, c_max = None, None
+        self.mean = stats_data['mean'].float()
+        self.std = stats_data['std'].float()
+        self.ctrl_mean = stats_data['ctrl_mean'].float()
+        self.ctrl_std = stats_data['ctrl_std'].float()
         
-        for s, c in zip(self.expanded_states, self.controls):
-            s_sum += s.sum(dim=0)
-            s_count += s.shape[0]
-            
-            cur_s_min = s.min(dim=0)[0]
-            cur_s_max = s.max(dim=0)[0]
-            
-            if s_min is None:
-                s_min, s_max = cur_s_min, cur_s_max
-            else:
-                s_min = torch.min(s_min, cur_s_min)
-                s_max = torch.max(s_max, cur_s_max)
+        # Logging only
+        self.s_min = stats_data['min']
+        self.s_max = stats_data['max']
 
-            # --- Control ---
-            c_sum += c.sum(dim=0)
-            c_count += c.shape[0]
-            
-            cur_c_min = c.min(dim=0)[0]
-            cur_c_max = c.max(dim=0)[0]
-            
-            if c_min is None:
-                c_min, c_max = cur_c_min, cur_c_max
-            else:
-                c_min = torch.min(c_min, cur_c_min)
-                c_max = torch.max(c_max, cur_c_max)
+        # Avoid div by zero
+        self.std[self.std < 1e-6] = 1.0
+        self.ctrl_std[self.ctrl_std < 1e-6] = 1.0
+
+    def _compute_stats_vectorized(self) -> Dict[str, torch.Tensor]:
+        # Concatenate all sequences to calculate global stats efficiently
+        # Since user opted out of lazy slicing, we assume RAM fits this.
+        all_s = torch.cat(self.states, dim=0)   # [Total_Frames, State_Dim]
+        all_c = torch.cat(self.controls, dim=0) # [Total_Frames, Control_Dim]
         
-        s_mean = s_sum / s_count
-        c_mean = c_sum / c_count
-        
-        s_var_sum = 0
-        c_var_sum = 0
-        
-        for s, c in zip(self.expanded_states, self.controls):
-            s_var_sum += ((s - s_mean) ** 2).sum(dim=0)
-            c_var_sum += ((c - c_mean) ** 2).sum(dim=0)
-        
-        s_std = torch.sqrt(s_var_sum / s_count)
-        s_std[s_std < 1e-6] = 1.0
-        c_std = torch.sqrt(c_var_sum / c_count)
-        c_std[c_std < 1e-6] = 1.0
-        
-        stats = {
-            "mean": s_mean,
-            "std": s_std,
-            "min": s_min,
-            "max": s_max,
-            "ctrl_mean": c_mean,
-            "ctrl_std": c_std,
-            "ctrl_min": c_min,
-            "ctrl_max": c_max
+        return {
+            "mean": all_s.mean(dim=0),
+            "std": all_s.std(dim=0),
+            "min": all_s.min(dim=0)[0],
+            "max": all_s.max(dim=0)[0],
+            "ctrl_mean": all_c.mean(dim=0),
+            "ctrl_std": all_c.std(dim=0),
+            "ctrl_min": all_c.min(dim=0)[0],
+            "ctrl_max": all_c.max(dim=0)[0]
         }
-        
-        # 5. 저장
-        with open(stats_file, 'w') as f:
-            json.dump({k: v.tolist() for k, v in stats.items()}, f, indent=4)
-            
-        return stats
-    
-    def _apply_normalization(self):
-        # 1. State Normalization
-        s_mean = self.stats['mean']
-        s_std = self.stats['std']
-        # Mask broadcasting: [D] -> [1, D]
-        mask = self.skip_norm_mask.unsqueeze(0) 
-        
-        for i in range(len(self.expanded_states)):
-            # If mask is True, keep original value, otherwise normalize
-            self.expanded_states[i] = torch.where(
-                mask, 
-                self.expanded_states[i], 
-                (self.expanded_states[i] - s_mean) / s_std
-            )
-
-        # 2. Control Normalization
-        c_mean = self.stats['ctrl_mean']
-        c_std = self.stats['ctrl_std']
-        
-        for i in range(len(self.controls)):
-            self.controls[i] = (self.controls[i] - c_mean) / c_std
 
     def _print_stats(self):
-        print(f"\n{'='*20} Dataset Statistics {'='*20}")
+        print(f"\n{'='*20} Dataset Statistics ({self.split}) {'='*20}")
         print(f"{'Idx':<5} {'Skip':<6} {'Mean':<10} {'Std':<10} {'Min':<10} {'Max':<10}")
-        print("-" * 60)
+        print("-" * 65)
         for i in range(self.current_state_dim):
             skip = "Yes" if self.skip_norm_mask[i] else "No"
-            m = self.stats['mean'][i].item()
-            s = self.stats['std'][i].item()
-            mn = self.stats['min'][i].item()
-            mx = self.stats['max'][i].item()
+            m = self.mean[i].item()
+            s = self.std[i].item()
+            mn = self.s_min[i].item()
+            mx = self.s_max[i].item()
             print(f"{i:<5} {skip:<6} {m:<10.4f} {s:<10.4f} {mn:<10.4f} {mx:<10.4f}")
-        print("="*60 + "\n")
+        print("="*65 + "\n")
 
     def _build_index(self) -> List[Tuple[int, int]]:
         indices = []
+        # Minimum required history length
         min_idx = self.hist_len * self.hist_stride
         
-        for seq_i, s in enumerate(self.expanded_states):
+        for seq_i, s in enumerate(self.states):
             L = s.shape[0]
+            # Max index allowing for prediction horizon
             max_idx = L - 1 - (self.pred_len * self.pred_stride)
             
             if max_idx >= min_idx:
-                for k in range(min_idx, max_idx + 1):
-                    indices.append((seq_i, k))
+                # Append valid 'k' (current time step) indices
+                # Vectorized list extension is faster than appending in loop
+                valid_range = range(min_idx, max_idx + 1)
+                indices.extend([(seq_i, k) for k in valid_range])
                     
         log.info(f"Generated {len(indices)} samples.")
         return indices
@@ -284,19 +278,33 @@ class KoopmanDataset(Dataset):
     def __getitem__(self, idx):
         seq_i, k = self.indices[idx]
         
-        s_full = self.expanded_states[seq_i]
+        # 1. Read-only access to source tensors
+        s_full = self.states[seq_i]
         c_full = self.controls[seq_i]
         
-        hist_indices = torch.arange(k - self.hist_len * self.hist_stride, k, self.hist_stride)
-        future_indices = torch.arange(k + self.pred_stride, k + self.pred_len * self.pred_stride + 1, self.pred_stride)
-        u_future_indices = torch.arange(k, k + self.pred_len * self.pred_stride, self.pred_stride)
+        # 2. Fast Indexing using pre-computed offsets
+        # Use broadcasting if needed, but here simple indexing works
+        x_hist = s_full[k + self.hist_offsets]
+        u_hist = c_full[k + self.hist_offsets]
         
-        x_hist = s_full[hist_indices]
-        u_hist = c_full[hist_indices]
         x_init = s_full[k]
-        x_future = s_full[future_indices]
-        u_future = c_full[u_future_indices]
+        
+        x_future = s_full[k + self.future_offsets]
+        u_future = c_full[k + self.u_future_offsets]
             
+        # 3. Normalization (Optimized)
+        if self.normalization:
+            # Note: Using torch.where is cleaner but computes both branches.
+            # Since dim is small (7), overhead is negligible compared to branching logic.
+            
+            x_hist = torch.where(self.skip_norm_mask, x_hist, (x_hist - self.mean) / self.std)
+            x_init = torch.where(self.skip_norm_mask, x_init, (x_init - self.mean) / self.std)
+            x_future = torch.where(self.skip_norm_mask, x_future, (x_future - self.mean) / self.std)
+            
+            # Control normalization (Assuming no skip mask for controls)
+            u_hist = (u_hist - self.ctrl_mean) / self.ctrl_std
+            u_future = (u_future - self.ctrl_mean) / self.ctrl_std
+
         return {
             "x_history": x_hist,
             "u_history": u_hist,

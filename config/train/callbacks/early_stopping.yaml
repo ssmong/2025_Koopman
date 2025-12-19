@@ -1,0 +1,5 @@
+_target_: src.utils.early_stopping.EarlyStopping
+patience: 20
+delta: 1e-6
+path: "best_model.pt"
+verbose: True

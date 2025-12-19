@@ -4,3 +4,5 @@ defaults:
   - data: attitude
   - model: model_lti
   - loss: default
+  - train: default
+  - _self_
