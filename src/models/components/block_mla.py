@@ -139,7 +139,7 @@ class MLABlock(nn.Module):
         v = rearrange(v, '... (h d) -> ... h d', d=self.head_dim)
 
         # 5. Flash Attention
-        # Contains at least one padding token in the sequence
+        # Contains at least one padding token in the seq
         cu_seqlens = kwargs.get('cu_seqlens')
         
         if attention_mask is not None:
@@ -159,7 +159,7 @@ class MLABlock(nn.Module):
             )
             o = pad_input(o, indices_q, batch_size, q_len)
         elif cu_seqlens is not None:
-            # varlen without padding mask tensor (packed sequence)
+            # varlen without padding mask tensor (packed seq)
             seqlen_offset = 0
             if past_key_values is not None:
                 seqlen_offset = past_key_values.get_seq_length(self.layer_idx)

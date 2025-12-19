@@ -11,8 +11,8 @@ control_key: control
 angle_indices: []
 quat_indices: [0, 1, 2, 3]
 
-num_sequences: 1000
-sequence_len: 1000
+num_seqs: 1000
+seq_len: 1000
 raw_dt: 0.1
 
 hist_dt: 0.1

@@ -23,8 +23,8 @@ class KoopmanDataset(Dataset):
         angle_indices: List[int],
         quat_indices: List[int],
         # File specific
-        num_sequences: int,
-        sequence_len: int,
+        num_seqs: int,
+        seq_len: int,
         raw_dt: float,
         hist_dt: float,
         hist_len: int,
@@ -50,8 +50,8 @@ class KoopmanDataset(Dataset):
         self.angle_indices = set(angle_indices) # O(1) lookup
         self.quat_indices = set(quat_indices)
 
-        self.num_sequences = num_sequences
-        self.sequence_len = sequence_len
+        self.num_seqs = num_seqs
+        self.seq_len = seq_len
         self.raw_dt = raw_dt
         
         self.hist_dt = hist_dt
@@ -111,7 +111,7 @@ class KoopmanDataset(Dataset):
             raise ValueError(f"pred_dt ({self.pred_dt}) must be multiple of raw_dt ({self.raw_dt})")
 
     def _load_and_process_data(self) -> Tuple[List[torch.Tensor], List[torch.Tensor], torch.Tensor]:
-        filename = f"{self.name}_{self.num_sequences}_{self.sequence_len}_{self.raw_dt}.h5"
+        filename = f"{self.name}_{self.num_seqs}_{self.seq_len}_{self.raw_dt}.h5"
         file_path = self.data_root / filename
         
         if not file_path.exists():
@@ -185,7 +185,7 @@ class KoopmanDataset(Dataset):
                 states_list.append(s_final)
                 controls_list.append(c_raw)
 
-        log.info(f"Loaded {len(states_list)} sequences for split '{self.split}'.")
+        log.info(f"Loaded {len(states_list)} seqs for split '{self.split}'.")
         return states_list, controls_list, skip_norm_mask
 
     def _setup_stats(self):
@@ -224,7 +224,7 @@ class KoopmanDataset(Dataset):
         self.ctrl_std[self.ctrl_std < 1e-6] = 1.0
 
     def _compute_stats_vectorized(self) -> Dict[str, torch.Tensor]:
-        # Concatenate all sequences to calculate global stats efficiently
+        # Concatenate all seqs to calculate global stats efficiently
         # Since user opted out of lazy slicing, we assume RAM fits this.
         all_s = torch.cat(self.states, dim=0)   # [Total_Frames, State_Dim]
         all_c = torch.cat(self.controls, dim=0) # [Total_Frames, Control_Dim]
