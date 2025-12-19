@@ -5,12 +5,35 @@ from tqdm import tqdm
 import torch
 from torch.utils.data import DataLoader
 import hydra
-from omegaconf import DictConfig, HydraConfig
+from omegaconf import DictConfig, HydraConfig, OmegaConf
+import wandb
+
+from src.utils.plot import plot_trajectory
 
 log = logging.getLogger(__name__)
 
 @hydra.main(config_path="config", config_name="config.yaml")
 def main(cfg: DictConfig):
+    # ------------------------------------------------------------------
+    #       0. WandB & Output Directory
+    # ------------------------------------------------------------------
+    hydra_cfg = HydraConfig.get()
+    output_dir = hydra_cfg.runtime.output_dir
+    orig_cwd = hydra.utils.get_original_cwd()
+    rel_path = os.path.relpath(output_dir, orig_cwd)
+
+    run_name = rel_path.replace(os.path.sep, "_")
+
+    wandb_cfg = OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True)
+    wandb.init(
+        project=cfg.wandb.project,
+        entity=cfg.wandb.entity,
+        group=cfg.wandb.group,
+        mode=cfg.wandb.mode,
+        config=wandb_cfg,
+        name=run_name,
+        id=run_name
+    )
     # ------------------------------------------------------------------
     #       1. Dataset & DataLoader
     # ------------------------------------------------------------------
@@ -58,6 +81,7 @@ def main(cfg: DictConfig):
     
     optimizer = hydra.utils.instantiate(cfg.optimizer, params=model.parameters())
     scheduler = hydra.utils.instantiate(cfg.scheduler, optimizer=optimizer)
+    scaler = torch.amp.GradScaler()
 
     criterion = hydra.utils.instantiate(cfg.loss)
     criterion.bind_model(model)
@@ -70,8 +94,6 @@ def main(cfg: DictConfig):
     epochs = cfg.train.epochs
     early_stopping = hydra.utils.instantiate(cfg.callbacks.early_stopping)
 
-    hydra_cfg = HydraConfig.get()
-    output_dir = hydra_cfg.runtime.output_dir
     best_model_path = os.path.join(output_dir, "best_model.pt")
     early_stopping.set_path(best_model_path)
 
@@ -86,6 +108,8 @@ def main(cfg: DictConfig):
 
     if max_steps > dataset_pred_len:
         raise ValueError(f"Max steps ({max_steps}) cannot be greater than dataset prediction length ({dataset_pred_len})")
+    
+    global_step = 0 # For logging WandB
 
     for epoch in range(epochs):
         # ------ TRAINING ----------------------------------------------
@@ -114,14 +138,25 @@ def main(cfg: DictConfig):
                 else:
                     batch_gpu[k] = v.to(device, non_blocking=True)
 
-            results = model(n_steps=curr_steps, **batch_gpu)
-            loss, metrics = criterion(results)
-
             optimizer.zero_grad()
-            loss.backward()
+
+            with torch.amp.autocast(enabled=True):
+                results = model(n_steps=curr_steps, **batch_gpu)
+                loss, metrics = criterion(results)
+
+            scaler.scale(loss).backward()
+
             if cfg.train.grad_clip_norm > 0:
+                scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.train.grad_clip_norm)
-            optimizer.step()
+            
+            scaler.step(optimizer)
+            scaler.update()
+
+            step_log = {f"train_step/{k}": v.item() if isinstance(v, torch.Tensor) else v for k, v in metrics.items()}
+            step_log['epoch'] = epoch
+            wandb.log(step_log, step=global_step)
+            global_step += 1
 
             for k, v in metrics.items():
                 val = v.item() if isinstance(v, torch.Tensor) else v
@@ -150,11 +185,21 @@ def main(cfg: DictConfig):
         avg_val_metrics = {k: v / len(val_loader) for k, v in val_metrics_sum.items()}
 
         # ------ LOGGING ----------------------------------------------
+        epoch_log = {}
+        epoch_log.update(avg_train_metrics)
+        epoch_log.update(avg_val_metrics)
+        epoch_log['epoch'] = epoch + 1
+
+        current_lr = optimizer.param_groups[0]['lr']
+        epoch_log['train/lr'] = current_lr
+        
+        wandb.log(epoch_log, step=global_step)
+
         log_msg = [f"\nEpoch {epoch+1}/{epochs} Summary:"]
         log_msg.append(f"{'Metric':<25} | {'Train':<12} | {'Val':<12}")
         log_msg.append("-" * 55)
         
-        # 키 정렬 (total을 맨 앞으로)
+        # Sort keys (total to the front)
         all_keys = sorted(set(avg_train_metrics.keys()) | set(avg_val_metrics.keys()))
         if 'loss/total' in all_keys:
             all_keys.remove('loss/total')
@@ -169,8 +214,7 @@ def main(cfg: DictConfig):
         log.info("\n".join(log_msg))
 
         # ------ SCHEDULER & EARLY STOPPING --------------------------------
-        val_total_loss = avg_val_metrics.get("loss/total", float('inf'))
-        
+        val_total_loss = avg_val_metrics.get("loss/total", float('inf')) 
         if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
             scheduler.step(val_total_loss)
         else:
@@ -206,10 +250,8 @@ def main(cfg: DictConfig):
 
     log.info(f"Test batches: {len(test_loader)}")
 
-    # Test Loop
     model.eval()
-    test_metrics_sum = {}
-    
+    test_metrics_sum = {}    
     with torch.no_grad():
         for batch in tqdm(test_loader, desc="Testing"):
             batch = {k: v.to(device) for k, v in batch.items()}
@@ -221,9 +263,8 @@ def main(cfg: DictConfig):
                 val = v.item() if isinstance(v, torch.Tensor) else v
                 test_metrics_sum[k] = test_metrics_sum.get(k, 0.0) + val
 
-    # Logging Results
     avg_test_metrics = {k: v / len(test_loader) for k, v in test_metrics_sum.items()}
-
+    wandb.log(avg_test_metrics)
     log_msg = ["\nFinal Test Results:"]
     log_msg.append(f"{'Metric':<25} | {'Test Score':<12}")
     log_msg.append("-" * 40)
@@ -240,6 +281,36 @@ def main(cfg: DictConfig):
 
     log.info("\n".join(log_msg))
     log.info("Training and Testing Completed.")
+
+    test_loader_plot = DataLoader(test_dataset, batch_size=1, shuffle=False)
+    
+    with torch.no_grad():
+        for i, batch in enumerate(test_loader_plot):
+            batch = {k: v.to(device) for k, v in batch.items()}
+            results = model(n_steps=dataset_pred_len, **batch)
+            
+            if i == 0:
+                x_pred = results['x_traj'][0] 
+                x_gt = results['x_traj_gt'][0]
+                
+                plot_save_path = os.path.join(output_dir, "test_plot.png")
+                plot_trajectory(
+                    t_pred=None,
+                    x_pred=x_pred,
+                    x_gt=x_gt,
+                    angle_indices=cfg.data.angle_indices,
+                    quat_indices=cfg.data.quat_indices,
+                    save_path=plot_save_path,
+                    mean=test_dataset.mean,
+                    std=test_dataset.std
+                )
+                
+                # [WandB] Upload plot to WandB
+                wandb.log({"test/trajectory_plot": wandb.Image(plot_save_path)})
+                log.info(f"Test plot uploaded to WandB and saved to {plot_save_path}")
+                break
+
+    wandb.finish()
         
 
 if __name__ == "__main__":

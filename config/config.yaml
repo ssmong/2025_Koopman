@@ -6,3 +6,9 @@ defaults:
   - loss: loss_default
   - train: train_default
   - _self_
+
+wandb:
+  project: "2025-koopman"
+  entity: null
+  group: "lti"
+  mode: "online"
