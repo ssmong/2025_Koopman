@@ -95,6 +95,7 @@ class LTIModel(nn.Module):
 
         return Az + Bu
 
+
     def forward(self, 
                 x_history: torch.Tensor,    # [B, W, D]     t=k-W, ..., k-1
                 u_history: torch.Tensor,    # [B, W, D]     t=k-W, ..., k-1

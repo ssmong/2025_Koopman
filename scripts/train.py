@@ -1,6 +1,7 @@
 import os
 import logging
 import random
+import time
 from tqdm import tqdm
 import torch
 from torch.utils.data import DataLoader
@@ -113,6 +114,7 @@ def main(cfg: DictConfig):
     global_step = 0 # For logging WandB
 
     for epoch in range(epochs):
+        epoch_start_time = time.time()
         # ------ TRAINING ----------------------------------------------
         model.train()
 
@@ -125,7 +127,7 @@ def main(cfg: DictConfig):
         
         pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs} [{mode_desc}]")
         
-        for batch in pbar:
+        for batch_idx, batch in enumerate(pbar):
             batch = {k: v.to(device) for k, v in batch.items()}
             if epoch < warmup_epochs:
                 curr_steps = warmup_steps
@@ -146,16 +148,25 @@ def main(cfg: DictConfig):
                 loss, metrics = criterion(results)
 
             scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
 
+            total_norm = 0.0
+            for p in model.parameters():
+                if p.grad is not None:
+                    param_norm = p.grad.data.norm(2)
+                    total_norm += param_norm.item() ** 2
+            total_norm = total_norm ** 0.5
+            
             if cfg.train.grad_clip_norm > 0:
-                scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.train.grad_clip_norm)
             
             scaler.step(optimizer)
             scaler.update()
 
-            step_log = {f"train_step/{k}": v.item() if isinstance(v, torch.Tensor) else v for k, v in metrics.items()}
+            step_log = {f"train/{k}": v.item() if isinstance(v, torch.Tensor) else v for k, v in metrics.items()}
             step_log['epoch'] = epoch
+            step_log['train/grad_norm'] = total_norm
+            step_log['train/lr'] = optimizer.param_groups[0]['lr']
             wandb.log(step_log, step=global_step)
             global_step += 1
 
@@ -163,8 +174,9 @@ def main(cfg: DictConfig):
                 val = v.item() if isinstance(v, torch.Tensor) else v
                 train_metrics_sum[k] = train_metrics_sum.get(k, 0.0) + val
             
-            total_loss = metrics.get('loss/total', loss)
-            pbar.set_postfix({'loss': f"{total_loss:.6f}"})
+            current_total_loss_sum = train_metrics_sum.get('loss/total', 0.0)
+            running_avg_loss = current_total_loss_sum / (batch_idx + 1)
+            pbar.set_postfix({'avg_loss': f"{running_avg_loss:.6f}"})
 
         avg_train_metrics = {k: v / len(train_loader) for k, v in train_metrics_sum.items()}
 
@@ -188,12 +200,15 @@ def main(cfg: DictConfig):
 
         # ------ LOGGING ----------------------------------------------
         epoch_log = {}
+
+        for k, v in avg_val_metrics.items():
+            epoch_log[f"val/{k}"] = v
+
+        epoch_log['epoch'] = epoch + 1
+        epoch_log['epoch_time'] = time.time() - epoch_start_time
+
         epoch_log.update(avg_train_metrics)
         epoch_log.update(avg_val_metrics)
-        epoch_log['epoch'] = epoch + 1
-
-        current_lr = optimizer.param_groups[0]['lr']
-        epoch_log['train/lr'] = current_lr
         
         wandb.log(epoch_log, step=global_step)
 
@@ -267,7 +282,10 @@ def main(cfg: DictConfig):
                 test_metrics_sum[k] = test_metrics_sum.get(k, 0.0) + val
 
     avg_test_metrics = {k: v / len(test_loader) for k, v in test_metrics_sum.items()}
-    wandb.log(avg_test_metrics)
+
+    wandb_test_log = {f"test/{k}": v for k, v in avg_test_metrics.items()}
+    wandb.log(wandb_test_log)
+
     log_msg = ["\nFinal Test Results:"]
     log_msg.append(f"{'Metric':<25} | {'Test Score':<12}")
     log_msg.append("-" * 40)
@@ -289,8 +307,9 @@ def main(cfg: DictConfig):
     
     with torch.no_grad():
         for i, batch in enumerate(test_loader_plot):
-            batch = {k: v.to(device) for k, v in batch.items()}
-            results = model(n_steps=dataset_pred_len, **batch)
+            with torch.amp.autocast(enabled=True, device_type=device.type):
+                batch = {k: v.to(device) for k, v in batch.items()}
+                results = model(n_steps=dataset_pred_len, **batch)
             
             if i == 0:
                 x_pred = results['x_traj'][0] 

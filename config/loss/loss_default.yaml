@@ -42,3 +42,23 @@ targets:
     weight: 0.1 
     key_pred: z_traj_re       
     key_target: z_traj        
+
+  # 4. Isometry Loss: || D_x^2 - s * D_z^2 ||^2
+  # Random subsampling
+  isometric:
+    _target_: src.losses.components.isometry.IsometryLoss
+
+    weight_decay: ${..._decay}
+    n_step_max: ${..._steps}
+
+    weight: 0.1
+
+    key_pred: z_traj_gt
+    key_target: x_traj_gt
+
+    quat_indices: ${data.quat_indices}
+    quat_loss_type: geodesic
+    quat_norm_weight: 0.0
+
+    min_scale: 1.0
+    sample_size: 512
