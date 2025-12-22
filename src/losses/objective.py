@@ -3,7 +3,7 @@ from typing import Dict
 
 
 class Objective(nn.Module):
-    def __init__(self, targets: Dict[str, nn.Module]):
+    def __init__(self, targets: Dict[str, nn.Module], **kwargs):
         super().__init__()
 
         self.targets = nn.ModuleDict(targets)

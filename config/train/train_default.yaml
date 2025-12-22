@@ -1,6 +1,9 @@
+_recursive_: False
+
 defaults:
   - optimizer: adamw
   - scheduler: cosine
+  - callbacks: early_stopping
   - _self_
 
 batch_size: 64

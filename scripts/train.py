@@ -80,8 +80,8 @@ def main(cfg: DictConfig):
     else:
         raise RuntimeError("CUDA is not available. Please check your GPU configuration.")
     
-    optimizer = hydra.utils.instantiate(cfg.optimizer, params=model.parameters())
-    scheduler = hydra.utils.instantiate(cfg.scheduler, optimizer=optimizer)
+    optimizer = hydra.utils.instantiate(cfg.train.optimizer, params=model.parameters())
+    scheduler = hydra.utils.instantiate(cfg.train.scheduler, optimizer=optimizer)
     scaler = torch.amp.GradScaler()
 
     criterion = hydra.utils.instantiate(cfg.loss)
@@ -93,7 +93,7 @@ def main(cfg: DictConfig):
     log.info(f"Starting training...")
 
     epochs = cfg.train.epochs
-    early_stopping = hydra.utils.instantiate(cfg.callbacks.early_stopping)
+    early_stopping = hydra.utils.instantiate(cfg.train.callbacks)
 
     best_model_path = os.path.join(output_dir, "best_model.pt")
     early_stopping.set_path(best_model_path)
@@ -141,7 +141,7 @@ def main(cfg: DictConfig):
 
             optimizer.zero_grad()
 
-            with torch.amp.autocast(enabled=True):
+            with torch.amp.autocast(enabled=True, device_type=device.type):
                 results = model(n_steps=curr_steps, **batch_gpu)
                 loss, metrics = criterion(results)
 
@@ -163,7 +163,7 @@ def main(cfg: DictConfig):
                 val = v.item() if isinstance(v, torch.Tensor) else v
                 train_metrics_sum[k] = train_metrics_sum.get(k, 0.0) + val
             
-            total_loss = metrics.get('loss/total', loss).item()
+            total_loss = metrics.get('loss/total', loss)
             pbar.set_postfix({'loss': f"{total_loss:.6f}"})
 
         avg_train_metrics = {k: v / len(train_loader) for k, v in train_metrics_sum.items()}

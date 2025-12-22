@@ -8,7 +8,8 @@ class BaseLoss(nn.Module):
                  weight_decay: float = 0.99, 
                  key_pred: str = None, 
                  key_target: str = None,
-                 n_step_max: int = 100):
+                 n_step_max: int = 100,
+                 **kwargs):
         super().__init__()
         self.weight = weight
         self.weight_decay = weight_decay
@@ -50,7 +51,7 @@ class BaseLoss(nn.Module):
         if self.weight_decay == 1.0:
             weighted_loss = loss_per_step.mean()
         else:
-            weights = self.decay_weights[:T]
+            weights = self.decay_weights[:T].to(loss_per_step.device)
             weighted_loss = (loss_per_step * weights).sum() / weights.sum()
         return weighted_loss
 

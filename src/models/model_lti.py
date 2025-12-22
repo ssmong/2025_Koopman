@@ -24,25 +24,25 @@ class LTIModel(nn.Module):
 
         self.encoder = hydra.utils.instantiate(
             lifting, 
-            in_dim=state_dim, 
-            out_dim=latent_dim
+            in_features=state_dim, 
+            out_features=latent_dim
         )   
         self.decoder = hydra.utils.instantiate(
             lifting, 
-            in_dim=latent_dim, 
-            out_dim=state_dim
+            in_features=latent_dim, 
+            out_features=state_dim
         )
 
         self.ctxt_encoder = hydra.utils.instantiate(context)
         self._to_A = hydra.utils.instantiate(
             matrix,
-            in_dim=self.latent_dim,
+            in_features=context.hidden_size,
             out_features=self.latent_dim 
         )
         
         self._to_B = hydra.utils.instantiate(
             matrix,
-            in_dim=self.latent_dim,
+            in_features=context.hidden_size,
             out_features=self.latent_dim * control_dim
         )
         

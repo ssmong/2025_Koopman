@@ -2,11 +2,11 @@ import torch.nn as nn
 from fla.modules import GatedMLP
 
 class GLUBlock(nn.Module):
-    def __init__(self, in_dim: int, out_features: int, hidden_dim: int = 128, hidden_ratio: int = 2):
+    def __init__(self, in_features: int, out_features: int, hidden_dim: int = 128, hidden_ratio: int = 2):
         super().__init__()
         
         self.net = nn.Sequential(
-            nn.Linear(in_dim, hidden_dim),
+            nn.Linear(in_features, hidden_dim),
             nn.SiLU(),
             GatedMLP(
                 hidden_size=hidden_dim,

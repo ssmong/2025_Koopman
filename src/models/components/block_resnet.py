@@ -5,8 +5,8 @@ from fla.modules import RMSNorm
 class ResNetBlock(nn.Module):
     def __init__(
         self, 
-        in_dim: int, 
-        out_dim: int,
+        in_features: int, 
+        out_features: int,
         hidden_size: int = 256,
         num_layers: int = 2,
         activation: nn.Module = nn.SiLU(),
@@ -14,7 +14,7 @@ class ResNetBlock(nn.Module):
     ):
         super().__init__()
         
-        self.input_proj = nn.Linear(in_dim, hidden_size)
+        self.input_proj = nn.Linear(in_features, hidden_size)
         
         self.blocks = nn.ModuleList()
         for _ in range(num_layers):
@@ -25,7 +25,7 @@ class ResNetBlock(nn.Module):
                 nn.Linear(hidden_size, hidden_size)
             ))
             
-        self.output_proj = nn.Linear(hidden_size, out_dim)
+        self.output_proj = nn.Linear(hidden_size, out_features)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.input_proj(x)

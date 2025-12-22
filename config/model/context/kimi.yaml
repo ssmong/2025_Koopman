@@ -4,14 +4,17 @@ hidden_size: 64
 num_layers: 4
 num_heads: 4
 
-kda:
+state_dim: ${data.state_dim}
+control_dim: ${data.control_dim}
+
+kda_params:
   norm_eps: 1e-6
   allow_neg_eigval: False
   expand_v: 1.0
   use_short_conv: True
   conv_size: 4
 
-mla:
+mla_params:
   kv_lora_rank: 16
   window_size: null
   qk_norm: True
