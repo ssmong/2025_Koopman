@@ -21,7 +21,7 @@ class BaseLoss(nn.Module):
 
         # Pre-compute decay weights
         if self.weight_decay != 1.0:
-            steps = torch.arange(n_step_max)
+            steps = torch.arange(n_step_max + 1)    # Add one for the initial state
             weights = self.weight_decay ** steps
             # register_buffer handles device movement automatically
             # persistent=False prevents saving this to state_dict

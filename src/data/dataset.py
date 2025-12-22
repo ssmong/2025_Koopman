@@ -30,6 +30,7 @@ class KoopmanDataset(Dataset):
         hist_len: int,
         pred_dt: float,
         pred_len: int,
+        sample_stride: int,
         split: str = "train",
         train_ratio: float = 0.8,
         val_ratio: float = 0.1,
@@ -58,6 +59,8 @@ class KoopmanDataset(Dataset):
         self.hist_len = hist_len
         self.pred_dt = pred_dt
         self.pred_len = pred_len
+
+        self.sample_stride = sample_stride
 
         self.split = split.lower()
         self.train_ratio = train_ratio
@@ -309,7 +312,7 @@ class KoopmanDataset(Dataset):
             if max_idx >= min_idx:
                 # Append valid 'k' (current time step) indices
                 # Vectorized list extension is faster than appending in loop
-                valid_range = range(min_idx, max_idx + 1)
+                valid_range = range(min_idx, max_idx + 1, self.sample_stride)
                 indices.extend([(seq_i, k) for k in valid_range])
                     
         log.info(f"Generated {len(indices)} samples.")

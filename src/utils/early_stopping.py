@@ -27,15 +27,15 @@ class EarlyStopping:
             self.best_loss = val_loss
             self.save_checkpoint(val_loss, model)
         elif val_loss < self.best_loss + self.delta:
+            self.best_loss = val_loss
+            self.save_checkpoint(val_loss, model)
+            self.counter = 0
+        else:
             self.counter += 1
             if self.verbose:
                 log.info(f'EarlyStopping counter: {self.counter} out of {self.patience}')
             if self.counter >= self.patience:
                 self.early_stop = True
-        else:
-            self.best_loss = val_loss
-            self.save_checkpoint(val_loss, model)
-            self.counter = 0
 
     def set_path(self, path: str):
         self.path = path

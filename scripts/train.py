@@ -176,8 +176,9 @@ def main(cfg: DictConfig):
             for batch in tqdm(val_loader, desc=f"Epoch {epoch+1}/{epochs} [Val]"):
                 batch = {k: v.to(device) for k, v in batch.items()}
                 
-                results = model(n_steps=dataset_pred_len, **batch)
-                _, metrics = criterion(results)
+                with torch.amp.autocast(enabled=True, device_type=device.type):
+                    results = model(n_steps=dataset_pred_len, **batch)
+                    _, metrics = criterion(results)
                 
                 for k, v in metrics.items():
                     val = v.item() if isinstance(v, torch.Tensor) else v
@@ -257,8 +258,9 @@ def main(cfg: DictConfig):
         for batch in tqdm(test_loader, desc="Testing"):
             batch = {k: v.to(device) for k, v in batch.items()}
             
-            results = model(n_steps=dataset_pred_len, **batch)
-            _, metrics = criterion(results)
+            with torch.amp.autocast(enabled=True, device_type=device.type):
+                results = model(n_steps=dataset_pred_len, **batch)
+                _, metrics = criterion(results)
             
             for k, v in metrics.items():
                 val = v.item() if isinstance(v, torch.Tensor) else v

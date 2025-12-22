@@ -129,17 +129,16 @@ class LTIModel(nn.Module):
             "z_traj": z_traj,
             "x_traj": x_traj,
         }
+        
+        # 1. Latent Consistency: z_traj_re = E(x_traj) should match z_traj
+        results["z_traj_re"] = self.encoder(x_traj) 
 
-        if self.training:
-            # 1. Latent Consistency: z_traj_re = E(x_traj) should match z_traj
-            results["z_traj_re"] = self.encoder(x_traj) 
-
-            # 2. GT Trajectories
-            x_traj_gt = torch.cat([x_init.unsqueeze(1), x_future], dim=1)  # [B, N+1, D]
-            results["x_traj_gt"] = x_traj_gt
-            
-            z_traj_gt = self.encoder(x_traj_gt)
-            results["z_traj_gt"] = z_traj_gt           
+        # 2. GT Trajectories
+        x_traj_gt = torch.cat([x_init.unsqueeze(1), x_future], dim=1)  # [B, N+1, D]
+        results["x_traj_gt"] = x_traj_gt
+        
+        z_traj_gt = self.encoder(x_traj_gt)
+        results["z_traj_gt"] = z_traj_gt           
             
         return results
     

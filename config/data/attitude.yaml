@@ -19,6 +19,7 @@ hist_dt: 0.1
 hist_len: 100
 pred_dt: 1.0
 pred_len: 100 
+sample_stride: 10
 
 normalization: true
 stats_dir: data/stats
