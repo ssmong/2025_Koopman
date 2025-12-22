@@ -1,7 +1,5 @@
 _target_: src.models.components.block_kimi.KimiBlock
 
-model_type: kimi
-
 hidden_size: 64
 num_layers: 4
 num_heads: 4

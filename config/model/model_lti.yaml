@@ -9,6 +9,6 @@ defaults:
 
 state_dim: ${data.state_dim}
 control_dim: ${data.control_dim}
-latent_dim: 64
+latent_dim: 32
 
-eigval_max: 1.05
+eigval_max: 1.01

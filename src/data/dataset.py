@@ -159,11 +159,32 @@ class KoopmanDataset(Dataset):
             # Load and Expand immediately to save memory spikes
             for seq_id in target_keys:
                 grp = ts_grp[seq_id]
+
+                np_s_raw = grp[self.state_key][:]
+                if np.isinf(np_s_raw).any():
+                    log.error(f"Seq {seq_id}: Found Infinity in RAW NUMPY state data!")
+                if np.isnan(np_s_raw).any():
+                    log.error(f"Seq {seq_id}: Found NaN in RAW NUMPY state data!")
+                np_c_raw = grp[self.control_key][:]
+                if np.isinf(np_c_raw).any():
+                    log.error(f"Seq {seq_id}: Found Infinity in RAW NUMPY control data!")
+                if np.isnan(np_c_raw).any():
+                    log.error(f"Seq {seq_id}: Found NaN in RAW NUMPY control data!")
+
                 
                 # Load Raw
                 s_raw = torch.from_numpy(grp[self.state_key][:]).float()
                 c_raw = torch.from_numpy(grp[self.control_key][:]).float()
                 
+                if torch.isinf(s_raw).any():
+                    log.error(f"Seq {seq_id}: Float32 overflow detected in RAW state data!")
+                if torch.isnan(s_raw).any():
+                    log.error(f"Seq {seq_id}: NaN detected in RAW state data!")
+                if torch.isinf(c_raw).any():
+                    log.error(f"Seq {seq_id}: Float32 overflow detected in RAW control data!")
+                if torch.isnan(c_raw).any():
+                    log.error(f"Seq {seq_id}: NaN detected in RAW control data!")
+
                 if s_raw.shape[-1] != self.raw_state_dim:
                     raise ValueError(f"Seq {seq_id}: Dim mismatch {s_raw.shape[-1]} != {self.raw_state_dim}")
 
@@ -182,6 +203,9 @@ class KoopmanDataset(Dataset):
                 else:
                     s_final = s_raw
 
+                if torch.isnan(s_final).any():
+                    log.error(f"Seq {seq_id}: NaN generated during feature expansion!")
+
                 states_list.append(s_final)
                 controls_list.append(c_raw)
 
@@ -192,7 +216,7 @@ class KoopmanDataset(Dataset):
         stats_file = self.stats_dir / f"{self.name}_stats.json"
         
         if self.split == 'train':
-            log.info("Computing stats (Vectorized)...")
+            log.info("Computing stats ...")
             stats_data = self._compute_stats_vectorized()
             
             # Save
@@ -216,8 +240,10 @@ class KoopmanDataset(Dataset):
         self.ctrl_std = stats_data['ctrl_std'].float()
         
         # Logging only
-        self.s_min = stats_data['min']
-        self.s_max = stats_data['max']
+        self.min = stats_data['min']
+        self.max = stats_data['max']
+        self.ctrl_min = stats_data['ctrl_min']
+        self.ctrl_max = stats_data['ctrl_max']
 
         # Avoid div by zero
         self.std[self.std < 1e-6] = 1.0
@@ -228,6 +254,11 @@ class KoopmanDataset(Dataset):
         # Since user opted out of lazy slicing, we assume RAM fits this.
         all_s = torch.cat(self.states, dim=0)   # [Total_Frames, State_Dim]
         all_c = torch.cat(self.controls, dim=0) # [Total_Frames, Control_Dim]
+
+        if torch.isnan(all_s).any():
+            log.error(f"!! FATAL !! Found NaN values in STATES data. Count: {torch.isnan(all_s).sum().item()}")
+        if torch.isnan(all_c).any():
+            log.error(f"!! FATAL !! Found NaN values in CONTROLS data. Count: {torch.isnan(all_c).sum().item()}")
         
         return {
             "mean": all_s.mean(dim=0),
@@ -248,10 +279,22 @@ class KoopmanDataset(Dataset):
             skip = "Yes" if self.skip_norm_mask[i] else "No"
             m = self.mean[i].item()
             s = self.std[i].item()
-            mn = self.s_min[i].item()
-            mx = self.s_max[i].item()
+            mn = self.min[i].item()
+            mx = self.max[i].item()
             print(f"{i:<5} {skip:<6} {m:<10.4f} {s:<10.4f} {mn:<10.4f} {mx:<10.4f}")
         print("="*65 + "\n")
+
+        print(f"\n{'='*25} CONTROL Statistics ({self.split}) {'='*24}")
+        print(f"{'Idx':<5} {'Skip':<6} {'Mean':<10} {'Std':<10} {'Min':<10} {'Max':<10}")
+        print("-" * 75)
+        for i in range(self.control_dim):
+            skip = "No" 
+            m = self.ctrl_mean[i].item()
+            s = self.ctrl_std[i].item()
+            mn = self.ctrl_min[i].item()
+            mx = self.ctrl_max[i].item()
+            print(f"{i:<5} {skip:<6} {m:<10.4f} {s:<10.4f} {mn:<10.4f} {mx:<10.4f}")
+        print("="*75 + "\n")
 
     def _build_index(self) -> List[Tuple[int, int]]:
         indices = []

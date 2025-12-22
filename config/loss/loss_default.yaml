@@ -9,8 +9,8 @@ targets:
   pred_x:
     _target_: src.losses.components.quat.QuatLoss
 
-    weight_decay: ${_decay}
-    n_step_max: ${_steps}
+    weight_decay: ${..._decay}
+    n_step_max: ${..._steps}
 
     weight: 1.0
     key_pred: x_traj          # [B, N+1, D]
@@ -24,8 +24,8 @@ targets:
   pred_z:
     _target_: src.losses.components.base.BaseLoss
 
-    weight_decay: ${_decay}
-    n_step_max: ${_steps}
+    weight_decay: ${..._decay}
+    n_step_max: ${..._steps}
     
     weight: 1.0
     key_pred: z_traj          # [B, N+1, D]
@@ -36,8 +36,8 @@ targets:
   recon_z:
     _target_: src.losses.components.base.BaseLoss
 
-    weight_decay: ${_decay}
-    n_step_max: ${_steps}
+    weight_decay: ${..._decay}
+    n_step_max: ${..._steps}
 
     weight: 0.1 
     key_pred: z_traj_re       

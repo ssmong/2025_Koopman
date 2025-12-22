@@ -1,0 +1,12 @@
+torch
+tqdm
+hydra-core
+omegaconf
+wandb
+h5py
+numpy
+matplotlib
+einops
+transformers>=4.45.0
+datasets>=3.3.0
+flash-linear-attention @ git+https://github.com/fla-org/flash-linear-attention.git

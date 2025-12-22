@@ -5,14 +5,15 @@ from tqdm import tqdm
 import torch
 from torch.utils.data import DataLoader
 import hydra
-from omegaconf import DictConfig, HydraConfig, OmegaConf
+from omegaconf import DictConfig, OmegaConf
+from hydra.core.hydra_config import HydraConfig
 import wandb
 
 from src.utils.plot import plot_trajectory
 
 log = logging.getLogger(__name__)
 
-@hydra.main(config_path="config", config_name="config.yaml")
+@hydra.main(config_path="../config", config_name="config.yaml", version_base=None)
 def main(cfg: DictConfig):
     # ------------------------------------------------------------------
     #       0. WandB & Output Directory
