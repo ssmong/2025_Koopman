@@ -99,11 +99,6 @@ def main(cfg: DictConfig):
             new_t0 = int(orig_t0 * steps_per_epoch)
             scheduler_cfg['T_0'] = new_t0
             log.info(f"Scaled T_0: {orig_t0} epochs -> {new_t0} steps")
-        if 'T_mult' in scheduler_cfg:
-            orig_tmult = scheduler_cfg['T_mult']
-            new_tmult = int(orig_tmult * steps_per_epoch)
-            scheduler_cfg['T_mult'] = new_tmult
-            log.info(f"Scaled T_mult: {orig_tmult} epochs -> {new_tmult} steps")
         if 'T_max' in scheduler_cfg:
             scheduler_cfg['T_max'] = int(cfg.train.epochs * steps_per_epoch)
 
