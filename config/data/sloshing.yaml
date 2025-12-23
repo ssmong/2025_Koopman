@@ -1,0 +1,25 @@
+_target_: src.data.dataset.KoopmanDataset
+
+name: sloshing
+data_root: data/raw
+raw_state_dim: 7
+state_dim: 7
+control_dim: 3
+state_key: state
+control_key: control_torque
+
+angle_indices: []
+quat_indices: [0, 1, 2, 3]
+
+num_seqs: 1000
+seq_len: 1000
+raw_dt: 0.1
+
+hist_dt: 0.1
+hist_len: 100
+pred_dt: 1.0
+pred_len: 100 
+sample_stride: 10
+
+normalization: true
+stats_dir: data/stats

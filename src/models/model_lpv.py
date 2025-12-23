@@ -4,7 +4,7 @@ import torch.nn as nn
 from omegaconf import DictConfig
 import hydra
 
-class LTIModel(nn.Module):
+class LPVModel(nn.Module):
     def __init__(self, 
                  state_dim: int, 
                  control_dim: int,
@@ -20,7 +20,7 @@ class LTIModel(nn.Module):
         self.latent_dim = latent_dim
         self.eigval_max = eigval_max
 
-        assert latent_dim % 2 == 0, f"Latent dim must be even for block-diagonal LTI, got {latent_dim}"
+        assert latent_dim % 2 == 0, f"Latent dim must be even for block-diagonal LPV, got {latent_dim}"
 
         self.encoder = hydra.utils.instantiate(
             lifting, 

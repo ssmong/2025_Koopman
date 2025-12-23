@@ -2,7 +2,7 @@ _recursive_: False
 
 defaults:
   - data: attitude
-  - model: model_lti
+  - model: model_lpv
   - loss: loss_default
   - train: train_default
   - _self_
@@ -10,5 +10,5 @@ defaults:
 wandb:
   project: "2025-koopman"
   entity: null
-  group: "lti"
+  group: "lpv"
   mode: "online"

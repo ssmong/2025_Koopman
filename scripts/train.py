@@ -81,12 +81,30 @@ def main(cfg: DictConfig):
     else:
         raise RuntimeError("CUDA is not available. Please check your GPU configuration.")
     
-    optimizer = hydra.utils.instantiate(cfg.train.optimizer, params=model.parameters())
-    scheduler = hydra.utils.instantiate(cfg.train.scheduler, optimizer=optimizer)
-    scaler = torch.amp.GradScaler()
-
     criterion = hydra.utils.instantiate(cfg.loss)
     criterion.bind_model(model)
+    criterion.to(device)
+    
+    combined_params = list(model.parameters()) + list(criterion.parameters())
+    optimizer = hydra.utils.instantiate(cfg.train.optimizer, params=combined_params)
+
+    # Build scheduler
+    scheduler_cfg = OmegaConf.to_container(cfg.train.scheduler, resolve=True)
+    step_per = scheduler_cfg.pop('step_per', 'epoch') # Pop out step_per key
+
+    if step_per == 'batch':
+        steps_per_epoch = len(train_loader)
+        if 'T_0' in scheduler_cfg:
+            orig_t0 = scheduler_cfg.T_0
+            new_t0 = int(orig_t0 * steps_per_epoch)
+            scheduler_cfg.T_0 = new_t0
+            log.info(f"Scaled T_0: {orig_t0} epochs -> {new_t0} steps")
+        if 'T_max' in scheduler_cfg:
+            scheduler_cfg.T_max = int(cfg.train.epochs * steps_per_epoch)
+
+    scheduler = hydra.utils.instantiate(scheduler_cfg, optimizer=optimizer)
+    
+    scaler = torch.amp.GradScaler()
 
     # ------------------------------------------------------------------
     #       3. Training Loop
@@ -163,6 +181,9 @@ def main(cfg: DictConfig):
             scaler.step(optimizer)
             scaler.update()
 
+            if step_per == 'batch':
+                scheduler.step()
+
             step_log = {f"train/{k}": v.item() if isinstance(v, torch.Tensor) else v for k, v in metrics.items()}
             step_log['epoch'] = epoch
             step_log['train/grad_norm'] = total_norm
@@ -232,10 +253,11 @@ def main(cfg: DictConfig):
 
         # ------ SCHEDULER & EARLY STOPPING --------------------------------
         val_total_loss = avg_val_metrics.get("loss/total", float('inf')) 
-        if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
-            scheduler.step(val_total_loss)
-        else:
-            scheduler.step()
+        if step_per == 'epoch':
+            if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                scheduler.step(avg_val_metrics.get("loss/total", float('inf')))
+            else:
+                scheduler.step()
             
         early_stopping(val_total_loss, model)
         if early_stopping.early_stop:
@@ -317,7 +339,7 @@ def main(cfg: DictConfig):
                 
                 plot_save_path = os.path.join(output_dir, "test_plot.png")
                 plot_trajectory(
-                    t_pred=None,
+                    pred_dt=cfg.data.pred_dt,
                     x_pred=x_pred,
                     x_gt=x_gt,
                     angle_indices=cfg.data.angle_indices,

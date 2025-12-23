@@ -109,9 +109,9 @@ class KoopmanDataset(Dataset):
 
     def _validate_strides(self):
         if not np.isclose(self.hist_stride * self.raw_dt, self.hist_dt, atol=1e-5):
-            raise ValueError(f"hist_dt ({self.hist_dt}) must be multiple of raw_dt ({self.raw_dt})")
+            raise ValueError(f"hist_dt ({self.hist_dt}) must be mulpvple of raw_dt ({self.raw_dt})")
         if not np.isclose(self.pred_stride * self.raw_dt, self.pred_dt, atol=1e-5):
-            raise ValueError(f"pred_dt ({self.pred_dt}) must be multiple of raw_dt ({self.raw_dt})")
+            raise ValueError(f"pred_dt ({self.pred_dt}) must be mulpvple of raw_dt ({self.raw_dt})")
 
     def _load_and_process_data(self) -> Tuple[List[torch.Tensor], List[torch.Tensor], torch.Tensor]:
         filename = f"{self.name}_{self.num_seqs}_{self.seq_len}_{self.raw_dt}.h5"

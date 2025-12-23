@@ -1,0 +1,5 @@
+_target_: torch.optim.lr_scheduler.CosineAnnealingWarmRestarts
+T_0: 10         # T_0 (epochs) – Number of iterations until the first restart.
+T_mult: 2       # A factor by which T_i increases after a restart.
+eta_min: 1e-6   # Minimum learning rate.
+step_per: batch

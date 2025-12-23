@@ -78,5 +78,5 @@ class IsometryLoss(QuatLoss):
         loss = F.mse_loss(dist_x_sq, current_scale * dist_z_sq)
         
         # Isometry Loss is not applicable to time axis due to sampling
-        # Simply perform weight multiplication and return
+        # Simply perform weight mulpvplication and return
         return self.weight * loss

@@ -4,7 +4,6 @@ import numpy as np
 import os
 
 def _compute_angle_error(q1, q2):
-    # Normalize
     q1 = q1 / (q1.norm(dim=-1, keepdim=True) + 1e-8)
     q2 = q2 / (q2.norm(dim=-1, keepdim=True) + 1e-8)
     
@@ -12,51 +11,63 @@ def _compute_angle_error(q1, q2):
     dot = torch.clamp(dot, -1.0, 1.0)
     return 2 * torch.acos(dot)
 
+def _unwrap_quaternion(q_seq):
+    """
+    q_seq: (T, 4) 
+    If the quaternion at time t is opposite to the quaternion at time t-1, invert the sign to maintain continuity.
+    """
+    q_out = q_seq.clone()
+    for t in range(1, q_out.shape[0]):
+        dot = torch.sum(q_out[t] * q_out[t-1])
+        if dot < 0:
+            q_out[t] = -q_out[t]
+    return q_out
+
 def plot_trajectory(
     pred_dt, x_pred, x_gt, 
     angle_indices, quat_indices, 
     save_path=None, 
     mean=None, std=None
 ):
-    """
-    Args:
-        pred_dt: float (Time step for x-axis)
-        x_pred: [T, D_expanded] (Normalized)
-        x_gt: [T, D_expanded] (Normalized)
-        angle_indices: List[int] (Original indices that were expanded to cos/sin)
-        quat_indices: List[int] (Original indices of quaternion start)
-        mean, std: Normalization stats (Tensor)
-    """
-    # 1. Denormalize
+    x_pred = x_pred.detach()
+    x_gt = x_gt.detach()
+
     if mean is not None and std is not None:
         device = x_pred.device
         mean = mean.to(device)
         std = std.to(device)
 
     plots = [] 
-
     angle_set = set(angle_indices)
     quat_set = set(quat_indices)
     
     current_col = 0
     raw_idx = 0
     
-    # Safety: Limit iterations to avoid infinite loop if logic mismatch
     while current_col < x_pred.shape[-1]:
         if raw_idx in quat_set:
-            # Quaternion (4 dims)
             q_pred = x_pred[:, current_col:current_col+4]
             q_gt = x_gt[:, current_col:current_col+4]
             
-            # Compute Error
-            err = np.rad2deg(_compute_angle_error(q_pred, q_gt))
+            q_pred = _unwrap_quaternion(q_pred)
+            q_gt = _unwrap_quaternion(q_gt)
+
+            if torch.sum(q_pred[0] * q_gt[0]) < 0:
+                q_pred = -q_pred
+
+            err = torch.rad2deg(_compute_angle_error(q_pred, q_gt))
             plots.append((f"State {raw_idx} (Quat Error)", err, None, "Degree"))
+
+            labels = ['x', 'y', 'z', 'w']
+            for i in range(4):
+                val_p = q_pred[:, i]
+                val_g = q_gt[:, i]
+                plots.append((f"State {raw_idx + i} (q_{labels[i]})", val_p, val_g, "Value"))
             
             current_col += 4
             raw_idx += 4
             
         elif raw_idx in angle_set:
-            # Angle (Cos, Sin) -> 2 dims
             cos_p, sin_p = x_pred[:, current_col], x_pred[:, current_col+1]
             cos_g, sin_g = x_gt[:, current_col], x_gt[:, current_col+1]
             
@@ -68,7 +79,6 @@ def plot_trajectory(
             raw_idx += 1
             
         else:
-            # Normal State
             val_p = x_pred[:, current_col]
             val_g = x_gt[:, current_col]
             
@@ -80,7 +90,6 @@ def plot_trajectory(
             current_col += 1
             raw_idx += 1
 
-    # 3. Plotting
     n_plots = len(plots)
     fig, axes = plt.subplots(n_plots, 1, figsize=(10, 3 * n_plots), sharex=True)
     if n_plots == 1: axes = [axes]
@@ -92,7 +101,6 @@ def plot_trajectory(
             ax.plot(time_steps, g_seq.cpu().numpy(), 'k-', label='GT', alpha=0.6)
             ax.plot(time_steps, p_seq.cpu().numpy(), 'r--', label='Pred')
         else:
-            # Error plot (Quat)
             ax.plot(time_steps, p_seq.cpu().numpy(), 'b-', label='Error')
             
         ax.set_ylabel(ylabel)
@@ -105,6 +113,6 @@ def plot_trajectory(
     
     if save_path:
         plt.savefig(save_path)
-        plt.close()
+        plt.close(fig)
     else:
         plt.show()

@@ -1,4 +1,4 @@
-_target_: src.models.model_lti.LTIModel
+_target_: src.models.model_lpv.LPVModel
 _recursive_: False
 
 defaults:
