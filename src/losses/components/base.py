@@ -4,11 +4,11 @@ from typing import Optional, Tuple
 
 class BaseLoss(nn.Module):
     def __init__(self, 
-                 weight: float = 1.0, 
-                 weight_decay: float = 0.99, 
-                 key_pred: str = None, 
-                 key_target: str = None,
-                 n_step_max: int = 100,
+                 weight: float, 
+                 weight_decay: float, 
+                 key_pred: str, 
+                 key_target: str,
+                 n_step_max: int,
                  **kwargs):
         super().__init__()
         self.weight = weight
