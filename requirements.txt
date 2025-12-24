@@ -5,6 +5,7 @@ omegaconf
 wandb
 h5py
 numpy
+cvxpy
 matplotlib
 einops
 transformers>=4.45.0

@@ -118,7 +118,7 @@ def main(cfg: DictConfig):
     early_stopping.set_path(best_model_path)
 
     # Random prediction length strategy
-    dataset_pred_len = cfg.data.pred_len
+    test_len = cfg.train.test_len
     seq_strategy = cfg.train.seq_strategy
 
     warmup_epochs = seq_strategy.warmup_epochs
@@ -126,8 +126,8 @@ def main(cfg: DictConfig):
     min_steps = seq_strategy.min_steps
     max_steps = seq_strategy.max_steps
 
-    if max_steps > dataset_pred_len:
-        raise ValueError(f"Max steps ({max_steps}) cannot be greater than dataset prediction length ({dataset_pred_len})")
+    if max_steps > test_len:
+        raise ValueError(f"Max steps ({max_steps}) cannot be greater than dataset prediction length ({test_len})")
     
     global_step = 0 # For logging WandB
 
@@ -164,6 +164,19 @@ def main(cfg: DictConfig):
             with torch.amp.autocast(enabled=True, device_type=device.type):
                 results = model(n_steps=curr_steps, **batch_gpu)
                 loss, metrics = criterion(results)
+
+            loss_val = loss.item()
+            
+            if not torch.isfinite(loss):
+                log.warning(f"Batch {batch_idx}: Loss is {loss_val} (NaN/Inf). Skipping batch.")
+                optimizer.zero_grad()
+                continue
+
+            loss_threshold = 100000.0
+            if loss_val > loss_threshold:
+                log.warning(f"Batch {batch_idx}: Loss {loss_val:.4f} exceeds threshold ({loss_threshold}). Skipping batch.")
+                optimizer.zero_grad()
+                continue
 
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
@@ -210,7 +223,7 @@ def main(cfg: DictConfig):
                 batch = {k: v.to(device) for k, v in batch.items()}
                 
                 with torch.amp.autocast(enabled=True, device_type=device.type):
-                    results = model(n_steps=dataset_pred_len, **batch)
+                    results = model(n_steps=test_len, **batch)
                     _, metrics = criterion(results)
                 
                 for k, v in metrics.items():
@@ -296,7 +309,7 @@ def main(cfg: DictConfig):
             batch = {k: v.to(device) for k, v in batch.items()}
             
             with torch.amp.autocast(enabled=True, device_type=device.type):
-                results = model(n_steps=dataset_pred_len, **batch)
+                results = model(n_steps=test_len, **batch)
                 _, metrics = criterion(results)
             
             for k, v in metrics.items():
@@ -331,7 +344,7 @@ def main(cfg: DictConfig):
         for i, batch in enumerate(test_loader_plot):
             with torch.amp.autocast(enabled=True, device_type=device.type):
                 batch = {k: v.to(device) for k, v in batch.items()}
-                results = model(n_steps=dataset_pred_len, **batch)
+                results = model(n_steps=test_len, **batch)
             
             if i == 0:
                 x_pred = results['x_traj'][0] 
