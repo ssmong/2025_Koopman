@@ -1,6 +1,5 @@
 _target_: src.losses.objective.Objective
 
-_steps: 100
 _decay: 0.99
 
 targets:
@@ -10,7 +9,6 @@ targets:
     _target_: src.losses.components.quat.QuatLoss
 
     weight_decay: ${..._decay}
-    n_step_max: ${..._steps}
 
     weight: 1.0
     key_pred: x_traj          # [B, N+1, D]
@@ -25,7 +23,6 @@ targets:
     _target_: src.losses.components.base.BaseLoss
 
     weight_decay: ${..._decay}
-    n_step_max: ${..._steps}
     
     weight: 1.0
     key_pred: z_traj          # [B, N+1, D]
@@ -37,7 +34,6 @@ targets:
     _target_: src.losses.components.base.BaseLoss
 
     weight_decay: ${..._decay}
-    n_step_max: ${..._steps}
 
     weight: 0.1 
     key_pred: z_traj_re       
@@ -49,7 +45,6 @@ targets:
     _target_: src.losses.components.isometry.IsometryLoss
 
     weight_decay: ${..._decay}
-    n_step_max: ${..._steps}
 
     weight: 0.1
 
