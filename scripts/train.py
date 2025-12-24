@@ -14,6 +14,8 @@ from src.utils.plot import plot_trajectory
 
 log = logging.getLogger(__name__)
 
+OmegaConf.register_new_resolver("max", lambda *args: max(args))
+
 @hydra.main(config_path="../config", config_name="learning.yaml", version_base=None)
 def main(cfg: DictConfig):
     # ------------------------------------------------------------------
@@ -41,13 +43,13 @@ def main(cfg: DictConfig):
     # ------------------------------------------------------------------
     log.info(f"Initializing dataset...")
 
-    pred_steps = cfg.train.pred_steps
+    train_steps = cfg.train.train_steps
     val_steps = cfg.train.val_steps
     test_steps = cfg.train.test_steps
-    n_step_max = max(pred_steps, val_steps, test_steps)
+    n_step_max = max(train_steps, val_steps, test_steps)
 
-    train_dataset = hydra.utils.instantiate(cfg.data, split="train", pred_steps=pred_steps)
-    val_dataset = hydra.utils.instantiate(cfg.data, split="val", pred_steps=val_steps)
+    train_dataset = hydra.utils.instantiate(cfg.data, split="train", train_steps=train_steps)
+    val_dataset = hydra.utils.instantiate(cfg.data, split="val", train_steps=val_steps)
 
     batch_size = cfg.train.batch_size
     num_workers = cfg.train.num_workers
@@ -86,7 +88,6 @@ def main(cfg: DictConfig):
     else:
         raise RuntimeError("CUDA is not available. Please check your GPU configuration.")
     
-
     criterion = hydra.utils.instantiate(cfg.loss, n_step_max=n_step_max)
     criterion.bind_model(model)
     criterion.to(device)
@@ -130,8 +131,8 @@ def main(cfg: DictConfig):
     min_steps = seq_strategy.min_steps
     max_steps = seq_strategy.max_steps
 
-    if max_steps > pred_steps:
-        raise ValueError(f"Max steps ({max_steps}) cannot be greater than dataset prediction length ({pred_steps})")
+    if max_steps > train_steps:
+        raise ValueError(f"Max steps ({max_steps}) cannot be greater than dataset prediction length ({train_steps})")
     
     global_step = 0 # For logging WandB
 
@@ -227,7 +228,7 @@ def main(cfg: DictConfig):
                 batch = {k: v.to(device) for k, v in batch.items()}
                 
                 with torch.amp.autocast(enabled=True, device_type=device.type):
-                    results = model(n_steps=val_steps, **batch)
+                    results = model(n_steps=test_steps, **batch)
                     _, metrics = criterion(results)
                 
                 for k, v in metrics.items():
@@ -294,7 +295,7 @@ def main(cfg: DictConfig):
     else:
         log.warning(f"Best model not found at {best_model_path}. Using current model weights.")
 
-    test_dataset = hydra.utils.instantiate(cfg.data, split="test", pred_steps=test_steps)
+    test_dataset = hydra.utils.instantiate(cfg.data, split="test", train_steps=test_steps)
     test_loader = DataLoader(
         test_dataset, 
         batch_size=cfg.train.batch_size, 

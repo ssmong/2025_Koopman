@@ -29,7 +29,7 @@ class KoopmanDataset(Dataset):
         hist_dt: float,
         hist_len: int,
         pred_dt: float,
-        pred_steps: int,
+        train_steps: int,
         sample_stride: int,
         split: str = "train",
         train_ratio: float = 0.8,
@@ -58,7 +58,7 @@ class KoopmanDataset(Dataset):
         self.hist_dt = hist_dt
         self.hist_len = hist_len
         self.pred_dt = pred_dt
-        self.pred_steps = pred_steps
+        self.train_steps = train_steps
 
         self.sample_stride = sample_stride
 
@@ -100,9 +100,9 @@ class KoopmanDataset(Dataset):
         # History: [k - H*s, ..., k - s]
         self.hist_offsets = torch.arange(-self.hist_len * self.hist_stride, 0, self.hist_stride, dtype=torch.long)
         # Future State: [k + s, ..., k + P*s]
-        self.future_offsets = torch.arange(self.pred_stride, self.pred_steps * self.pred_stride + 1, self.pred_stride, dtype=torch.long)
+        self.future_offsets = torch.arange(self.pred_stride, self.train_steps * self.pred_stride + 1, self.pred_stride, dtype=torch.long)
         # Future Control: [k, ..., k + (P-1)*s] -> often u_k is applied to get x_{k+1}
-        self.u_future_offsets = torch.arange(0, self.pred_steps * self.pred_stride, self.pred_stride, dtype=torch.long)
+        self.u_future_offsets = torch.arange(0, self.train_steps * self.pred_stride, self.pred_stride, dtype=torch.long)
 
         # 4. Build Index Map
         self.indices = self._build_index()
@@ -307,7 +307,7 @@ class KoopmanDataset(Dataset):
         for seq_i, s in enumerate(self.states):
             L = s.shape[0]
             # Max index allowing for prediction horizon
-            max_idx = L - 1 - (self.pred_steps * self.pred_stride)
+            max_idx = L - 1 - (self.train_steps * self.pred_stride)
             
             if max_idx >= min_idx:
                 # Append valid 'k' (current time step) indices

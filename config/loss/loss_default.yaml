@@ -1,6 +1,7 @@
 _target_: src.losses.objective.Objective
 
 _decay: 0.99
+_n_step_max: ${max:${train.train_steps}, ${train.val_steps}, ${train.test_steps}}
 
 targets:
   # 1. Prediction Loss: || x_gt - D(z_pred) ||^2
@@ -8,6 +9,7 @@ targets:
   pred_x:
     _target_: src.losses.components.quat.QuatLoss
 
+    n_step_max: ${..._n_step_max}
     weight_decay: ${..._decay}
 
     weight: 1.0
@@ -22,6 +24,7 @@ targets:
   pred_z:
     _target_: src.losses.components.base.BaseLoss
 
+    n_step_max: ${..._n_step_max}
     weight_decay: ${..._decay}
     
     weight: 1.0
@@ -33,6 +36,7 @@ targets:
   recon_z:
     _target_: src.losses.components.base.BaseLoss
 
+    n_step_max: ${..._n_step_max}
     weight_decay: ${..._decay}
 
     weight: 0.1 
@@ -44,6 +48,7 @@ targets:
   isometric:
     _target_: src.losses.components.isometry.IsometryLoss
 
+    n_step_max: ${..._n_step_max}
     weight_decay: ${..._decay}
 
     weight: 0.1
