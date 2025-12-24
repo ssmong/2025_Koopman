@@ -118,6 +118,7 @@ def main(cfg: DictConfig):
     early_stopping.set_path(best_model_path)
 
     # Random prediction length strategy
+    pred_len = cfg.data.pred_len
     test_len = cfg.train.test_len
     seq_strategy = cfg.train.seq_strategy
 
@@ -126,8 +127,8 @@ def main(cfg: DictConfig):
     min_steps = seq_strategy.min_steps
     max_steps = seq_strategy.max_steps
 
-    if max_steps > test_len:
-        raise ValueError(f"Max steps ({max_steps}) cannot be greater than dataset prediction length ({test_len})")
+    if max_steps > pred_len:
+        raise ValueError(f"Max steps ({max_steps}) cannot be greater than dataset prediction length ({pred_len})")
     
     global_step = 0 # For logging WandB
 
