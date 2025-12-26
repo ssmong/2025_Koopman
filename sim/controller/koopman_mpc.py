@@ -1,7 +1,27 @@
+from ast import Dict
 import torch
 import numpy as np
 import cvxpy as cp
 import scipy.sparse as spa
+
+from Basilisk.architecture import sysModel, messaging
+from Basilisk.architecture import bskLogging
+
+from sim.utils.load import load_model
+
+class BskKoopmanMPC(sysModel.SysModel):
+    def __init__(
+        self,
+        checkpoint_dir: str,
+        mpc_params: Dict,
+        device: str = "cuda"
+        ):
+        super().__init__()
+
+        self.model, self.hist_len, self.stats_tensor = load_model(checkpoint_dir, device)
+        self.device = device
+
+        
 
 class KoopmanMPC:
     def __init__(self, 
@@ -48,7 +68,7 @@ class KoopmanMPC:
             
         self.prob = cp.Problem(cp.Minimize(cost), constraints)
 
-    def get_action(self, obs: dict):
+    def get_control(self, obs: dict):
         x_ref  = obs["x_ref"]
         x_curr = obs["x_curr"]
         x_hist = obs["x_history"]

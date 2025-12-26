@@ -21,4 +21,3 @@ pred_dt: 1.0
 sample_stride: 10
 
 normalization: true
-stats_dir: data/stats

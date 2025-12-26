@@ -48,8 +48,20 @@ def main(cfg: DictConfig):
     test_steps = cfg.train.test_steps
     n_step_max = max(train_steps, val_steps, test_steps)
 
-    train_dataset = hydra.utils.instantiate(cfg.data, split="train", train_steps=train_steps)
-    val_dataset = hydra.utils.instantiate(cfg.data, split="val", train_steps=val_steps)
+    stats_dir = os.path.join(output_dir, "stats")
+
+    train_dataset = hydra.utils.instantiate(
+        cfg.data, 
+        split="train", 
+        train_steps=train_steps,
+        stats_dir=stats_dir
+    )
+    val_dataset = hydra.utils.instantiate(
+        cfg.data, 
+        split="val", 
+        train_steps=val_steps,
+        stats_dir=stats_dir
+    )
 
     batch_size = cfg.train.batch_size
     num_workers = cfg.train.num_workers
@@ -174,12 +186,6 @@ def main(cfg: DictConfig):
             
             if not torch.isfinite(loss):
                 log.warning(f"Batch {batch_idx}: Loss is {loss_val} (NaN/Inf). Skipping batch.")
-                optimizer.zero_grad()
-                continue
-
-            loss_threshold = 100000.0
-            if loss_val > loss_threshold:
-                log.warning(f"Batch {batch_idx}: Loss {loss_val:.4f} exceeds threshold ({loss_threshold}). Skipping batch.")
                 optimizer.zero_grad()
                 continue
 
