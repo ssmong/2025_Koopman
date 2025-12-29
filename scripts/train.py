@@ -163,7 +163,6 @@ def main(cfg: DictConfig):
         pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs} [{mode_desc}]")
         
         for batch_idx, batch in enumerate(pbar):
-            batch = {k: v.to(device) for k, v in batch.items()}
             if epoch < warmup_epochs:
                 curr_steps = warmup_steps
             else:
@@ -171,12 +170,13 @@ def main(cfg: DictConfig):
 
             batch_gpu = {}    
             for k, v in batch.items():
-                if k in ['x_future', 'u_future']: 
-                    batch_gpu[k] = v[:, :curr_steps, :].to(device, non_blocking=True)
+                tensor_gpu = v.to(device, non_blocking=True)
+                if k in ['x_future', 'u_future']:
+                    batch_gpu[k] = tensor_gpu[:, :curr_steps, :]
                 else:
-                    batch_gpu[k] = v.to(device, non_blocking=True)
+                    batch_gpu[k] = tensor_gpu
 
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)
 
             with torch.amp.autocast(enabled=True, device_type=device.type):
                 results = model(n_steps=curr_steps, **batch_gpu)

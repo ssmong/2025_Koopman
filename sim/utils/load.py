@@ -25,8 +25,6 @@ def load_model(checkpoint_dir: str, device: str = "cuda"):
     model.to(device)
     model.eval()
 
-    hist_len = cfg.data.hist_len
-
     data_name = cfg.data.name
     stats_path = os.path.join(checkpoint_dir, "stats", f"{data_name}_stats.json")
     if not os.path.exists(stats_path):
@@ -34,14 +32,14 @@ def load_model(checkpoint_dir: str, device: str = "cuda"):
     with open(stats_path, 'r') as f:
         stats = json.load(f)
     
-    stats_tensor = {}
+    stats_dict = {}
     keys = ["mean", "std", "ctrl_mean", "ctrl_std"]
     for key in keys:
         if key in stats:
-            stats_tensor[key] = torch.tensor(stats[key], dtype=torch.float32, device=device)
+            stats_dict[key] = torch.tensor(stats[key], dtype=torch.float32, device=device)
         else:
             raise ValueError(f"Key {key} not found in stats")
 
     log.info(f"Loaded stats from {stats_path}")
 
-    return model, hist_len, stats_tensor
+    return model, cfg, stats_dict

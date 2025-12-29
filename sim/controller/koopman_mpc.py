@@ -1,4 +1,5 @@
 from ast import Dict
+import logging
 import torch
 import numpy as np
 import cvxpy as cp
@@ -6,8 +7,12 @@ import scipy.sparse as spa
 
 from Basilisk.architecture import sysModel, messaging
 from Basilisk.architecture import bskLogging
+from Basilisk.utilities import RigidBodyKinematics as rbk
 
+from src.data.dataset import KoopmanDataProcessor
 from sim.utils.load import load_model
+
+log = logging.getLogger(__name__)
 
 class BskKoopmanMPC(sysModel.SysModel):
     def __init__(
@@ -18,10 +23,112 @@ class BskKoopmanMPC(sysModel.SysModel):
         ):
         super().__init__()
 
-        self.model, self.hist_len, self.stats_tensor = load_model(checkpoint_dir, device)
+        self.model, self.prev_cfg, self.stats_dict = load_model(checkpoint_dir, device)
         self.device = device
 
+        self.processor = KoopmanDataProcessor(
+            raw_state_dim=self.prev_cfg.data.raw_state_dim,
+            state_dim=self.prev_cfg.data.state_dim,
+            control_dim=self.prev_cfg.data.control_dim,
+            angle_indices=self.prev_cfg.data.angle_indices,
+            quat_indices=self.prev_cfg.data.quat_indices,
+            normalization=self.prev_cfg.data.normalization,
+            # Since we loaded the stats from load_model, we don't need to specify the stats_dir
+            stats_dir=None,          
+            name=self.prev_cfg.data.name,
+            device=device,
+        )
+
+        self.processor.set_stats(self.stats_dict)
+
+        self.hist_len = self.prev_cfg.data.hist_len
+        self.control_dim = self.prev_cfg.data.control_dim
+
+        self.controller = KoopmanMPC(
+            model=self.model,
+            device=device,
+            **mpc_params,
+        )
+
+        self.guidInMMsg = messaging.AttGuidMsgReader()
+        self.cmdTorqueOutMsg = messaging.CmdTorqueBodyMsg()
+
+        x_ref = [1, 0, 0, 0, 0, 0, 0]
+        self.x_ref_norm = self.processor.normalize_state(x_ref, is_expanded=False)
+
+        self.x_history = deque(maxlen=self.hist_len)
+        self.u_history = deque(maxlen=self.hist_len)
+        self.prev_u = np.zeros(self.control_dim)
+
+        log.info(f"Basilisk Koopman MPC initialized successfully from {checkpoint_dir}")
+
+    def reset(self, CurrentSimNanos: int):
+        # Check message connections
+        if not self.guidInMsg.isLinked():
+            self.bskLogger.bskLog(bskLogging.BSK_ERROR, "guidInMsg not linked")
+            return
         
+        # Initialize messages and buffers
+        payload = self.cmdTorqueOutMsg.zeroMsgPayload
+        self.cmdTorqueOutMsg.write(payload, CurrentSimNanos, self.moduleID)
+
+        self.x_history.clear()
+        self.u_history.clear()
+        self.prev_u = np.zeros(self.control_dim)
+
+        if self.guidInMsg.isWritten():
+            guid_msg = self.guidInMsg()
+            sigma_BR = np.array(guid_msg.sigma_BR)
+            omega_BR_B = np.array(guid_msg.omega_BR_B)
+            
+            # MRP -> Quaternion (Scalar First: [q0, q1, q2, q3])
+            ep_BR = rbk.MRP2EP(sigma_BR)
+            x_init_np = np.concatenate([ep_BR, omega_BR_B])
+        else:
+            # Fallback
+            x_init_np = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        
+        x_init_norm = self.processor.normalize_state(x_init_np, is_expanded=False)
+        u_init_norm = self.processor.normalize_control(self.prev_u)
+
+        for _ in range(self.hist_len):
+            self.x_history.append(x_init_norm)
+            self.u_history.append(u_init_norm)
+
+        self.bskLogger.bskLog(bskLogging.BSK_INFORMATION, "Reset Koopman MPC successfully")
+
+    def update(self, CurrentSimNanos: int):
+        guid_msg = self.guidInMsg()
+        sigma_BR = np.array(guid_msg.sigma_BR)
+        omega_BR_B = np.array(guid_msg.omega_BR_B)
+        ep_BR = rbk.MRP2EP(sigma_BR)
+
+        x_curr = np.concatenate([ep_BR, omega_BR_B])
+        x_curr_norm = self.processor.normalize_state(x_curr, is_expanded=False)
+        u_prev_norm = self.processor.normalize_control(self.prev_u)
+
+        self.x_history.append(x_curr_norm)
+        self.u_history.append(u_prev_norm)
+
+        obs = {
+            "x_curr": x_curr_norm,
+            "x_ref": self.x_ref_norm,
+            "x_history": torch.stack(list(self.x_history)),
+            "u_history": torch.stack(list(self.u_history)),
+        }
+
+        try:
+            u_opt_norm = self.controller.getControl(obs)
+        except Exception as e:
+            self.bskLogger.bskLog(bskLogging.BSK_ERROR, f"MPC Error: {e}")
+            u_opt_norm = np.zeros(self.control_dim)
+        
+        u_opt = self.processor.denormalize_control(u_opt_norm).detach().cpu().numpy()
+        self.prev_u = u_opt
+
+        out_payload = messaging.CmdTorqueBodyMsgPayload()
+        out_payload.torqueRequestBody = u_opt
+        self.cmdTorqueOutMsg.write(out_payload, CurrentSimNanos, self.moduleID)
 
 class KoopmanMPC:
     def __init__(self, 
@@ -48,6 +155,9 @@ class KoopmanMPC:
         
         self.A_dyn = cp.Parameter((self.latent_dim, self.latent_dim)) 
         self.B_dyn = cp.Parameter((self.latent_dim, self.control_dim))
+
+        self.prev_z_seq = None
+        self.prev_u_seq = None
         
         Q_np = np.array(Q_diag)
         R_np = np.array(R_diag)
@@ -68,7 +178,7 @@ class KoopmanMPC:
             
         self.prob = cp.Problem(cp.Minimize(cost), constraints)
 
-    def get_control(self, obs: dict):
+    def getControl(self, obs: dict):
         x_ref  = obs["x_ref"]
         x_curr = obs["x_curr"]
         x_hist = obs["x_history"]
@@ -92,10 +202,16 @@ class KoopmanMPC:
         self.z_ref.value = z_ref
         
         if not spa.issparse(A_val):
-            A_val = spa.csc_matrix(A_val)
-            
+            A_val = spa.csc_matrix(A_val)      
         self.A_dyn.value = A_val
         self.B_dyn.value = B_val 
+
+        if self.prev_z_seq is not None:
+            self.z.value = np.vstack([self.prev_z_seq[1:], self.prev_z_seq[-1:]])
+            self.u.value = np.vstack([self.prev_u_seq[1:], self.prev_u_seq[-1:]])
+        else:
+            self.z.value = np.tile(z_curr, (self.horizon + 1, 1))
+            self.u.value = np.zeros((self.horizon, self.control_dim))
         
         try:
             self.prob.solve(
@@ -107,9 +223,14 @@ class KoopmanMPC:
                 polish=False
             )
         except cp.SolverError:
+            log.error("Solver error in Koopman MPC: cp.SolverError")
             return np.zeros(self.control_dim)
             
         if self.u.value is None:
+            log.error("Solver error in Koopman MPC: u.value is None")
             return np.zeros(self.control_dim)
-            
+        
+        self.prev_z_seq = self.z.value
+        self.prev_u_seq = self.u.value
+
         return self.u.value[0]
