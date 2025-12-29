@@ -7,6 +7,7 @@ from Basilisk.fswAlgorithms import (
 from Basilisk.simulation import simpleNav
 from Basilisk.architecture import messaging
 from Basilisk.utilities import unitTestSupport
+from Basilisk.utilities import RigidBodyKinematics as rbk
 
 class FSW:
     def __init__(self, bsk_sim):
@@ -74,7 +75,10 @@ class FSW:
         self.inertial3DObj.ModelTag = "inertial3D"
         # Priority 90
         self.bsk_sim.scSim.AddModelToTask(self.bsk_sim.fswTaskName, self.inertial3DObj, 90)
-        self.inertial3DObj.sigma_R0N = [0., 0., 0.]
+        
+        # Convert Quaternion (Config) to MRP (Basilisk)
+        q_R0N = self.sim_cfg.target_attitude
+        self.inertial3DObj.sigma_R0N = rbk.EP2MRP(q_R0N)
 
         self.attError = attTrackingError.attTrackingError()
         self.attError.ModelTag = "attErrorInertial3D"
@@ -88,7 +92,10 @@ class FSW:
 
     def _setup_control(self):
         self.controller = hydra.utils.instantiate(self.ctl_cfg)
-        self.controller.ModelTag = "Controller"
+        
+        # Set ModelTag only if not already set by controller
+        if not hasattr(self.controller, "ModelTag"):
+            self.controller.ModelTag = "Controller"
         
         if hasattr(self.controller, 'set_warmup_time'):
             self.controller.set_warmup_time(self.sim_cfg.warmup_time)

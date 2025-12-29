@@ -7,5 +7,5 @@ hydra:
   run:
     dir: outputs/evaluate/${now:%Y-%m-%d}/${now:%H-%M-%S}
   sweep:
-    dir: outputs/evaluate/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    dir: outputs/evaluate/sweep/${now:%Y-%m-%d}/${now:%H-%M-%S}
     subdir: ${hydra.job.num}

@@ -25,6 +25,7 @@ class BskKoopmanMPC(sysModel.SysModel):
         device: str = "cuda"
         ):
         super().__init__()
+        self.ModelTag = "KoopmanMPC"
 
         self.model, self.prev_cfg, self.stats_dict = load_model(checkpoint_dir, device)
         self.device = device
@@ -67,7 +68,6 @@ class BskKoopmanMPC(sysModel.SysModel):
         self.warmup_time = 0.0
         self.last_hist_update_time = -1.0
         
-        # Initialize Profiler
         self.profiler = ControllerProfiler(skip_first=True)
 
         log.info(f"Basilisk Koopman MPC initialized successfully from {checkpoint_dir}")
@@ -142,7 +142,6 @@ class BskKoopmanMPC(sysModel.SysModel):
             "u_history": list(self.u_history),
         }
 
-        # Measure Computation Time
         t_start = time.perf_counter()
         
         try:
@@ -155,7 +154,6 @@ class BskKoopmanMPC(sysModel.SysModel):
         wall_time = t_end - t_start
         solver_time = self.controller.last_solver_time
         
-        # Update Profiler
         self.profiler.update(wall_time, solver_time)
         
         u_opt = self.processor.denormalize_control(u_opt_norm)

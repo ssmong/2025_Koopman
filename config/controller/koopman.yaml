@@ -1,7 +1,7 @@
 _target_: sim.controller.koopman_mpc.BskKoopmanMPC
 
-checkpoint_path: "outputs/checkpoints/best_model"
-device: "cpu"
+checkpoint_dir: "2025-12-29/09-45-40"
+device: "cuda"
 
 mpc_params:
   horizon: 100

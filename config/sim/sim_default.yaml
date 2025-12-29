@@ -9,6 +9,8 @@ ctrl_dt: 0.1     # [sec] Control update step
 log_dt: 0.1      # [sec] Data logging step
 warmup_time: 10.0 # [sec] Wait for history buffer to fill
 
+target_attitude: [1.0, 0.0, 0.0, 0.0] # Quaternion [q0, q1, q2, q3]
+
 show_plots: true
 use_vizard: false
 

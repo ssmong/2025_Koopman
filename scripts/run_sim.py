@@ -36,7 +36,9 @@ def run(cfg: DictConfig):
 
     # Print Controller Profiling Stats
     if hasattr(sim.fsw.controller, "profiler"):
-        sim.fsw.controller.profiler.print_stats(name="Koopman MPC")
+        # Use ModelTag if available, otherwise default to "Controller"
+        controller_name = getattr(sim.fsw.controller, "ModelTag", "Controller")
+        sim.fsw.controller.profiler.print_stats(name=controller_name)
 
     if cfg.sim.show_plots:
         log.info("Generating plots...")
