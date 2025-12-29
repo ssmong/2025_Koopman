@@ -1,46 +1,24 @@
 defaults:
   - /sim/sloshing@sloshing: no_sloshing
+  - /sim/sc@sc: sc_default
   - _self_
 
-duration: 100.0  # [sec]
-step_size: 0.01   # [sec]
+sim_time: 100.0  # [sec]
+sim_dt: 0.01     # [sec] Dynamics integration step
+ctrl_dt: 0.1     # [sec] Control update step
+log_dt: 0.1      # [sec] Data logging step
+warmup_time: 10.0 # [sec] Wait for history buffer to fill
 
 show_plots: true
 use_vizard: false
 
-spacecraft:
-  tag: "SMRL-Sat"
-  mass: 500.0
-  # Inertia [Ixx, 0, 0, 0, Iyy, 0, 0, 0, Izz]
-  inertia: [101.67, 0.0, 0.0, 0.0, 135.42, 0.0, 0.0, 0.0, 153.75]
-  
-  orbit:
-    R_E: 6378.1366  # [km]
-    a: 402.72       # [km]
-    e: 0.00130547
-    i: 51.6         # [deg]
-    Omega: 198.39   # [deg]
-    omega: 39.26    # [deg]
-    f: 117.71       # [deg]
-
-  init_attitude:
-    ep_BN: [0.648, 0.517, -0.414, 0.376]  # scalar-first quaternion
-    omega_BN_B: [0.0, 0.0, 0.0]
-
 env:
-  include_sun: true
-  drag:
-    enable: true
-    coeffs:
-      hub: {area: 1.0, coeff: 2.2}
-      panel: {area: 2.0, coeff: 2.2}
-  srp:
-    enable: true
-    coeffs:
-      hub: {area: 1.0, diff: 0.1, spec: 0.9}
-      panel: {area: 2.0, diff: 0.16, spec: 0.16}
+  include_sun: true   # For gravity effector
+  enable_drag: true
+  enable_srp: true
 
 sensors:
+  rng_seed: 42
   nav_noise:
     pos: 0.0      # [m]
     vel: 0.0      # [m/s]

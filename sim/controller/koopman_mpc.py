@@ -1,5 +1,6 @@
 from typing import Dict
 import logging
+import time
 from collections import deque
 import torch
 import numpy as np
@@ -12,6 +13,7 @@ from Basilisk.utilities import RigidBodyKinematics as rbk
 
 from src.data.dataset import KoopmanDataProcessor
 from sim.utils.load import load_model
+from sim.utils.profiler import ControllerProfiler
 
 log = logging.getLogger(__name__)
 
@@ -43,6 +45,8 @@ class BskKoopmanMPC(sysModel.SysModel):
 
         self.hist_len = self.prev_cfg.data.hist_len
         self.control_dim = self.prev_cfg.data.control_dim
+        
+        self.hist_dt = self.prev_cfg.data.get('dt', 0.1)
 
         self.controller = KoopmanMPC(
             model=self.model,
@@ -59,8 +63,17 @@ class BskKoopmanMPC(sysModel.SysModel):
         self.x_history = deque(maxlen=self.hist_len)
         self.u_history = deque(maxlen=self.hist_len)
         self.prev_u = np.zeros(self.control_dim)
+        
+        self.warmup_time = 0.0
+        self.last_hist_update_time = -1.0
+        
+        # Initialize Profiler
+        self.profiler = ControllerProfiler(skip_first=True)
 
         log.info(f"Basilisk Koopman MPC initialized successfully from {checkpoint_dir}")
+
+    def set_warmup_time(self, time: float):
+        self.warmup_time = time
 
     def Reset(self, CurrentSimNanos: int):        
         if not self.guidInMsg.isLinked():
@@ -73,12 +86,12 @@ class BskKoopmanMPC(sysModel.SysModel):
         self.x_history.clear()
         self.u_history.clear()
         self.prev_u = np.zeros(self.control_dim)
+        self.last_hist_update_time = -1.0
 
         if self.guidInMsg.isWritten():
             guid_msg = self.guidInMsg()
             sigma_BR = np.array(guid_msg.sigma_BR)
             omega_BR_B = np.array(guid_msg.omega_BR_B)
-            
             ep_BR = rbk.MRP2EP(sigma_BR)
             x_init_np = np.concatenate([ep_BR, omega_BR_B])
         else:
@@ -94,6 +107,7 @@ class BskKoopmanMPC(sysModel.SysModel):
         self.bskLogger.bskLog(bskLogging.BSK_INFORMATION, "Reset Koopman MPC successfully")
 
     def UpdateState(self, CurrentSimNanos: int):
+        current_time_sec = CurrentSimNanos * 1e-9
         
         if not self.guidInMsg.isLinked():
             return
@@ -105,10 +119,21 @@ class BskKoopmanMPC(sysModel.SysModel):
 
         x_curr = np.concatenate([ep_BR, omega_BR_B])
         x_curr_norm = self.processor.normalize_state(x_curr, is_expanded=False)
-        u_prev_norm = self.processor.normalize_control(self.prev_u)
+        
+        if self.last_hist_update_time < 0 or (current_time_sec - self.last_hist_update_time) >= self.hist_dt - 1e-6:
+            u_prev_norm = self.processor.normalize_control(self.prev_u)
+            self.x_history.append(x_curr_norm)
+            self.u_history.append(u_prev_norm)
+            self.last_hist_update_time = current_time_sec
 
-        self.x_history.append(x_curr_norm)
-        self.u_history.append(u_prev_norm)
+        if current_time_sec < self.warmup_time:
+            u_opt = np.zeros(self.control_dim)
+            self.prev_u = u_opt
+            
+            out_payload = messaging.CmdTorqueBodyMsgPayload()
+            out_payload.torqueRequestBody = u_opt.tolist()
+            self.cmdTorqueOutMsg.write(out_payload, CurrentSimNanos, self.moduleID)
+            return
 
         obs = {
             "x_curr": x_curr_norm,
@@ -117,11 +142,21 @@ class BskKoopmanMPC(sysModel.SysModel):
             "u_history": list(self.u_history),
         }
 
+        # Measure Computation Time
+        t_start = time.perf_counter()
+        
         try:
             u_opt_norm = self.controller.getControl(obs)
         except Exception as e:
             self.bskLogger.bskLog(bskLogging.BSK_ERROR, f"MPC Error: {e}")
             u_opt_norm = np.zeros(self.control_dim)
+            
+        t_end = time.perf_counter()
+        wall_time = t_end - t_start
+        solver_time = self.controller.last_solver_time
+        
+        # Update Profiler
+        self.profiler.update(wall_time, solver_time)
         
         u_opt = self.processor.denormalize_control(u_opt_norm)
         if isinstance(u_opt, torch.Tensor):
@@ -129,7 +164,6 @@ class BskKoopmanMPC(sysModel.SysModel):
 
         self.prev_u = u_opt
 
-        # Payload 생성 및 쓰기
         out_payload = messaging.CmdTorqueBodyMsgPayload()
         out_payload.torqueRequestBody = u_opt.tolist()
         self.cmdTorqueOutMsg.write(out_payload, CurrentSimNanos, self.moduleID)
@@ -162,6 +196,7 @@ class KoopmanMPC:
 
         self.prev_z_seq = None
         self.prev_u_seq = None
+        self.last_solver_time = None
         
         Q_np = np.array(Q_diag)
         R_np = np.array(R_diag)
@@ -225,6 +260,12 @@ class KoopmanMPC:
                 adaptive_rho=True,
                 polish=False
             )
+            # Try to get solver time
+            if hasattr(self.prob, 'solver_stats') and self.prob.solver_stats is not None:
+                self.last_solver_time = self.prob.solver_stats.solve_time
+            else:
+                self.last_solver_time = None
+                
         except cp.SolverError:
             log.error("Solver error in Koopman MPC: cp.SolverError")
             return np.zeros(self.control_dim)

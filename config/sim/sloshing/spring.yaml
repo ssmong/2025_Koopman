@@ -1,0 +1,23 @@
+_target_: sim.setup.sloshing.SpringMassSloshing
+mass_init: 70.0
+r_TB_B: [0.0, 0.0, 0.1]
+particles:
+  - k: 100.0
+    c: 5.0
+    mass: 10.0
+    rho: 0.05
+    pos: [0.1, 0.0, -0.1]
+    dir: [1.0, 0.0, 0.0]
+  - k: 100.0
+    c: 5.0
+    mass: 10.0
+    rho: -0.025
+    pos: [0.0, 0.0, 0.1]
+    dir: [0.0, 1.0, 0.0]
+  - k: 100.0
+    c: 5.0
+    mass: 10.0
+    rho: -0.025
+    pos: [-0.1, 0.0, 0.1]
+    dir: [0.0, 0.0, 1.0]
+

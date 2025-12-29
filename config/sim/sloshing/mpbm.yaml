@@ -1,0 +1,3 @@
+_target_: sim.setup.sloshing.MPBMSloshing
+mass_init: 100.0
+

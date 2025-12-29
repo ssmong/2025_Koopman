@@ -1,0 +1,35 @@
+tag: "SMRL-Sat"
+mass: 500.0
+# Inertia [Ixx, 0, 0, 0, Iyy, 0, 0, 0, Izz]
+inertia: [101.67, 0.0, 0.0, 0.0, 135.42, 0.0, 0.0, 0.0, 153.75]
+
+orbit:
+  R_E: 6378.1366  # [km]
+  a: 402.72       # [km]
+  e: 0.00130547
+  i: 51.6         # [deg]
+  Omega: 198.39   # [deg]
+  omega: 39.26    # [deg]
+  f: 117.71       # [deg]
+
+init_attitude:
+  q_BN: [0.648, 0.517, -0.414, 0.376]  # scalar-first quaternion
+  omega_BN_B: [0.0, 0.0, 0.0]
+
+geometry:
+  hub:
+    size: 1.0 # [m]
+    area: 1.0 # [m^2]
+    coeff: 2.2
+    diff: 0.1
+    spec: 0.9
+  panel:
+    area: 2.0 # [m^2]
+    coeff: 2.2
+    diff: 0.16
+    spec: 0.16
+    offset: 1.5 # distance from center along Y axis
+
+actuators:
+  use_rw: false
+
