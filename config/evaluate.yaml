@@ -1,0 +1,11 @@
+defaults:
+  - sim: sim_default
+  - control: koopman
+  - _self_
+
+hydra:
+  run:
+    dir: outputs/evaluate/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    dir: outputs/evaluate/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra.job.num}

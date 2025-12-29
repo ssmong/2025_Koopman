@@ -369,8 +369,8 @@ def main(cfg: DictConfig):
                     angle_indices=cfg.data.angle_indices,
                     quat_indices=cfg.data.quat_indices,
                     save_path=plot_save_path,
-                    mean=test_dataset.mean,
-                    std=test_dataset.std
+                    mean=train_dataset.processor.mean,
+                    std=train_dataset.processor.std
                 )
                 
                 # [WandB] Upload plot to WandB

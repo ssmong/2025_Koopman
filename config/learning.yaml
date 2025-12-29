@@ -12,3 +12,10 @@ wandb:
   entity: null
   group: "lpv"
   mode: "online"
+
+hydra:
+  run:
+    dir: outputs/learning/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    dir: outputs/learning/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra.job.num}

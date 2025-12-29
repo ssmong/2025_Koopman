@@ -41,14 +41,13 @@ def run(cfg: DictConfig):
     
     # 2.1 Spacecraft
     scObject = spacecraft.Spacecraft()
-    scObject.ModelTag = "bsk-Sat"
+    scObject.ModelTag = "SMRL-Sat"
     
     # Mass Properties
     scObject.hub.mHub = cfg.simulation.spacecraft.mass
     scObject.hub.IHubPntBc_B = unitTestSupport.np2EigenMatrix3d(cfg.simulation.spacecraft.inertia)
     
     # Initial Orbit (Earth Centered)
-    mu = 3.986004418e14
     oe = orbitalMotion.ClassicElements()
     oe.a = cfg.simulation.spacecraft.orbit.a * 1000 # km -> m
     oe.e = cfg.simulation.spacecraft.orbit.e
