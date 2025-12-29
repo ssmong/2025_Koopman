@@ -5,7 +5,7 @@ import numpy as np
 from pathlib import Path
 import json
 import logging
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Union
 
 log = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ class KoopmanDataProcessor:
         angle_indices: List[int],
         quat_indices: List[int],
         normalization: bool = True,
-        stats_dir: str = "data/stats"
+        stats_dir: str = "data/stats",
         name: str = "dataset",
         device: str = "cpu"
     ):
@@ -46,11 +46,16 @@ class KoopmanDataProcessor:
     
     def to(self, device: str):
         self.device = device
+        if self.mean is not None:
             self.mean = self.mean.to(device)
+        if self.std is not None:
             self.std = self.std.to(device)
+        if self.ctrl_mean is not None:
             self.ctrl_mean = self.ctrl_mean.to(device)
+        if self.ctrl_std is not None:
             self.ctrl_std = self.ctrl_std.to(device)
-            self.skip_norm_mask = self.skip_norm_mask.to(device)
+        
+        self.skip_norm_mask = self.skip_norm_mask.to(device)
         return self
     
     def _build_mask(self) -> torch.Tensor:
@@ -108,7 +113,7 @@ class KoopmanDataProcessor:
         else:
             stats_path = Path(stats_path)
         
-        states_path.parent.mkdir(parents=True, exist_ok=True)
+        stats_path.parent.mkdir(parents=True, exist_ok=True)
 
         stats_data = {
             "mean": self.mean, "std": self.std,
@@ -144,7 +149,7 @@ class KoopmanDataProcessor:
             x = x.to(self.device).float()
 
         if not is_expanded:
-            x = self.expand_features(x)        
+            x = self.expand_features(x)         
         if self.normalization and self.mean is not None:
             return torch.where(self.skip_norm_mask, x, (x - self.mean) / self.std)
         return x
@@ -205,7 +210,8 @@ class KoopmanDataset(Dataset):
         train_ratio: float = 0.8,
         val_ratio: float = 0.1,
         normalization: bool = True,
-        stats_dir: str = "data/stats"
+        stats_dir: str = "data/stats",
+        device: str = "cpu"
     ):
         super().__init__()
         
@@ -286,9 +292,9 @@ class KoopmanDataset(Dataset):
 
     def _validate_strides(self):
         if not np.isclose(self.hist_stride * self.raw_dt, self.hist_dt, atol=1e-5):
-            raise ValueError(f"hist_dt ({self.hist_dt}) must be mulpvple of raw_dt ({self.raw_dt})")
+            raise ValueError(f"hist_dt ({self.hist_dt}) must be multiple of raw_dt ({self.raw_dt})")
         if not np.isclose(self.pred_stride * self.raw_dt, self.pred_dt, atol=1e-5):
-            raise ValueError(f"pred_dt ({self.pred_dt}) must be mulpvple of raw_dt ({self.raw_dt})")
+            raise ValueError(f"pred_dt ({self.pred_dt}) must be multiple of raw_dt ({self.raw_dt})")
 
     def _load_data(self) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
         filename = f"{self.name}_{self.num_seqs}_{self.seq_len}_{self.raw_dt}.h5"
@@ -356,7 +362,7 @@ class KoopmanDataset(Dataset):
                 controls_list.append(c_raw)
 
         log.info(f"Loaded {len(states_list)} seqs for split '{self.split}'.")
-        return states_list, controls_list, skip_norm_mask
+        return states_list, controls_list
 
     def _compute_stats(self) -> Dict[str, torch.Tensor]:
         # Concatenate all seqs to calculate global stats efficiently
@@ -380,11 +386,11 @@ class KoopmanDataset(Dataset):
         print(f"{'Idx':<5} {'Skip':<6} {'Mean':<10} {'Std':<10} {'Min':<10} {'Max':<10}")
         print("-" * 65)
         for i in range(self.current_state_dim):
-            skip = "Yes" if self.skip_norm_mask[i] else "No"
-            m = self.mean[i].item()
-            s = self.std[i].item()
-            mn = self.min[i].item()
-            mx = self.max[i].item()
+            skip = "Yes" if self.processor.skip_norm_mask[i] else "No"
+            m = self.processor.mean[i].item()
+            s = self.processor.std[i].item()
+            mn = self.processor.min[i].item()
+            mx = self.processor.max[i].item()
             print(f"{i:<5} {skip:<6} {m:<10.4f} {s:<10.4f} {mn:<10.4f} {mx:<10.4f}")
         print("="*65 + "\n")
 
@@ -393,10 +399,10 @@ class KoopmanDataset(Dataset):
         print("-" * 75)
         for i in range(self.control_dim):
             skip = "No" 
-            m = self.ctrl_mean[i].item()
-            s = self.ctrl_std[i].item()
-            mn = self.ctrl_min[i].item()
-            mx = self.ctrl_max[i].item()
+            m = self.processor.ctrl_mean[i].item()
+            s = self.processor.ctrl_std[i].item()
+            mn = self.processor.ctrl_min[i].item()
+            mx = self.processor.ctrl_max[i].item()
             print(f"{i:<5} {skip:<6} {m:<10.4f} {s:<10.4f} {mn:<10.4f} {mx:<10.4f}")
         print("="*75 + "\n")
 

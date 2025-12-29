@@ -1,0 +1,35 @@
+duration: 100.0  # [sec]
+step_size: 0.1   # [sec]
+
+show_plots: true
+use_vizard: false
+
+spacecraft:
+  mass: 500.0
+  # Inertia [Ixx, 0, 0, 0, Iyy, 0, 0, 0, Izz]
+  inertia: [101.67, 0.0, 0.0, 0.0, 135.42, 0.0, 0.0, 0.0, 153.75]
+  
+  # 초기 궤도 (LEO)
+  orbit:
+    R_E: 6378.1366  # [km]
+    a: 402.72       # [km]
+    e: 0.00130547
+    i: 51.6         # [deg]
+    Omega: 198.39   # [deg]
+    omega: 39.26    # [deg]
+    f: 117.71       # [deg]
+
+  initial_attitude:
+
+environment:
+  use_gravity: true
+  use_atmosphere: false
+  use_srp: false
+  use_sloshing: false
+
+sensors:
+  nav_noise:
+    pos: 0.0      # [m]
+    vel: 0.0      # [m/s]
+    att: 0.0      # [rad] (sigma)
+    rate: 0.0     # [rad/s]
