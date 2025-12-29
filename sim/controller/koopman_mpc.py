@@ -50,8 +50,8 @@ class BskKoopmanMPC(sysModel.SysModel):
             **mpc_params,
         )
 
-        self.guidInMsg = messaging.AttGuidMsg_C()
-        self.cmdTorqueOutMsg = messaging.CmdTorqueBodyMsg_C()
+        self.guidInMsg = messaging.AttGuidMsgReader()
+        self.cmdTorqueOutMsg = messaging.CmdTorqueBodyMsg()
 
         x_ref = [1, 0, 0, 0, 0, 0, 0]
         self.x_ref_norm = self.processor.normalize_state(x_ref, is_expanded=False)
@@ -62,7 +62,7 @@ class BskKoopmanMPC(sysModel.SysModel):
 
         log.info(f"Basilisk Koopman MPC initialized successfully from {checkpoint_dir}")
 
-    def reset(self, CurrentSimNanos: int):
+    def Reset(self, CurrentSimNanos: int):        
         if not self.guidInMsg.isLinked():
             self.bskLogger.bskLog(bskLogging.BSK_ERROR, "guidInMsg not linked")
             return
@@ -93,7 +93,8 @@ class BskKoopmanMPC(sysModel.SysModel):
 
         self.bskLogger.bskLog(bskLogging.BSK_INFORMATION, "Reset Koopman MPC successfully")
 
-    def update(self, CurrentSimNanos: int):
+    def UpdateState(self, CurrentSimNanos: int):
+        
         if not self.guidInMsg.isLinked():
             return
 
@@ -128,6 +129,7 @@ class BskKoopmanMPC(sysModel.SysModel):
 
         self.prev_u = u_opt
 
+        # Payload 생성 및 쓰기
         out_payload = messaging.CmdTorqueBodyMsgPayload()
         out_payload.torqueRequestBody = u_opt.tolist()
         self.cmdTorqueOutMsg.write(out_payload, CurrentSimNanos, self.moduleID)
