@@ -1,5 +1,6 @@
-from ast import Dict
+from typing import Dict
 import logging
+from collections import deque
 import torch
 import numpy as np
 import cvxpy as cp
@@ -33,7 +34,6 @@ class BskKoopmanMPC(sysModel.SysModel):
             angle_indices=self.prev_cfg.data.angle_indices,
             quat_indices=self.prev_cfg.data.quat_indices,
             normalization=self.prev_cfg.data.normalization,
-            # Since we loaded the stats from load_model, we don't need to specify the stats_dir
             stats_dir=None,          
             name=self.prev_cfg.data.name,
             device=device,
@@ -50,8 +50,8 @@ class BskKoopmanMPC(sysModel.SysModel):
             **mpc_params,
         )
 
-        self.guidInMMsg = messaging.AttGuidMsgReader()
-        self.cmdTorqueOutMsg = messaging.CmdTorqueBodyMsg()
+        self.guidInMsg = messaging.AttGuidMsg_C()
+        self.cmdTorqueOutMsg = messaging.CmdTorqueBodyMsg_C()
 
         x_ref = [1, 0, 0, 0, 0, 0, 0]
         self.x_ref_norm = self.processor.normalize_state(x_ref, is_expanded=False)
@@ -63,13 +63,11 @@ class BskKoopmanMPC(sysModel.SysModel):
         log.info(f"Basilisk Koopman MPC initialized successfully from {checkpoint_dir}")
 
     def reset(self, CurrentSimNanos: int):
-        # Check message connections
         if not self.guidInMsg.isLinked():
             self.bskLogger.bskLog(bskLogging.BSK_ERROR, "guidInMsg not linked")
             return
         
-        # Initialize messages and buffers
-        payload = self.cmdTorqueOutMsg.zeroMsgPayload
+        payload = messaging.CmdTorqueBodyMsgPayload()
         self.cmdTorqueOutMsg.write(payload, CurrentSimNanos, self.moduleID)
 
         self.x_history.clear()
@@ -81,11 +79,9 @@ class BskKoopmanMPC(sysModel.SysModel):
             sigma_BR = np.array(guid_msg.sigma_BR)
             omega_BR_B = np.array(guid_msg.omega_BR_B)
             
-            # MRP -> Quaternion (Scalar First: [q0, q1, q2, q3])
             ep_BR = rbk.MRP2EP(sigma_BR)
             x_init_np = np.concatenate([ep_BR, omega_BR_B])
         else:
-            # Fallback
             x_init_np = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         
         x_init_norm = self.processor.normalize_state(x_init_np, is_expanded=False)
@@ -98,6 +94,9 @@ class BskKoopmanMPC(sysModel.SysModel):
         self.bskLogger.bskLog(bskLogging.BSK_INFORMATION, "Reset Koopman MPC successfully")
 
     def update(self, CurrentSimNanos: int):
+        if not self.guidInMsg.isLinked():
+            return
+
         guid_msg = self.guidInMsg()
         sigma_BR = np.array(guid_msg.sigma_BR)
         omega_BR_B = np.array(guid_msg.omega_BR_B)
@@ -113,8 +112,8 @@ class BskKoopmanMPC(sysModel.SysModel):
         obs = {
             "x_curr": x_curr_norm,
             "x_ref": self.x_ref_norm,
-            "x_history": torch.stack(list(self.x_history)),
-            "u_history": torch.stack(list(self.u_history)),
+            "x_history": list(self.x_history),
+            "u_history": list(self.u_history),
         }
 
         try:
@@ -123,11 +122,14 @@ class BskKoopmanMPC(sysModel.SysModel):
             self.bskLogger.bskLog(bskLogging.BSK_ERROR, f"MPC Error: {e}")
             u_opt_norm = np.zeros(self.control_dim)
         
-        u_opt = self.processor.denormalize_control(u_opt_norm).detach().cpu().numpy()
+        u_opt = self.processor.denormalize_control(u_opt_norm)
+        if isinstance(u_opt, torch.Tensor):
+            u_opt = u_opt.detach().cpu().numpy()
+
         self.prev_u = u_opt
 
         out_payload = messaging.CmdTorqueBodyMsgPayload()
-        out_payload.torqueRequestBody = u_opt
+        out_payload.torqueRequestBody = u_opt.tolist()
         self.cmdTorqueOutMsg.write(out_payload, CurrentSimNanos, self.moduleID)
 
 class KoopmanMPC:
@@ -185,26 +187,25 @@ class KoopmanMPC:
         u_hist = obs["u_history"]
         
         with torch.no_grad():
-            x_hist_t = torch.FloatTensor(x_hist).unsqueeze(0).to(self.device)
-            u_hist_t = torch.FloatTensor(u_hist).unsqueeze(0).to(self.device)
-            x_curr_t = torch.FloatTensor(x_curr).unsqueeze(0).to(self.device)
+            x_hist_t = torch.FloatTensor(np.array(x_hist)).unsqueeze(0).to(self.device)
+            u_hist_t = torch.FloatTensor(np.array(u_hist)).unsqueeze(0).to(self.device)
+            x_curr_t = torch.FloatTensor(np.array(x_curr)).unsqueeze(0).to(self.device)
             
-            A_val = self.model.get_A(x_hist_t, u_hist_t).squeeze(0).cpu().numpy()
-            B_val = self.model.get_B(x_hist_t, u_hist_t).squeeze(0).cpu().numpy()
+            A_val = self.model.get_A(x_hist_t, u_hist_t).squeeze(0)
+            B_val = self.model.get_B(x_hist_t, u_hist_t).squeeze(0)
             
             z_curr = self.model.encoder(x_curr_t).squeeze(0).cpu().numpy()
     
-            x_ref_t = torch.FloatTensor(x_ref).unsqueeze(0).to(self.device)
+            x_ref_t = torch.FloatTensor(np.array(x_ref)).unsqueeze(0).to(self.device)
             z_ref_point = self.model.encoder(x_ref_t).squeeze(0).cpu().numpy()
             z_ref = np.tile(z_ref_point, (self.horizon + 1, 1))
             
         self.z_init.value = z_curr
         self.z_ref.value = z_ref
         
-        if not spa.issparse(A_val):
-            A_val = spa.csc_matrix(A_val)      
-        self.A_dyn.value = A_val
-        self.B_dyn.value = B_val 
+        A_val_np = A_val.cpu().numpy()
+        self.A_dyn.value = spa.csc_matrix(A_val_np)
+        self.B_dyn.value = B_val.cpu().numpy()
 
         if self.prev_z_seq is not None:
             self.z.value = np.vstack([self.prev_z_seq[1:], self.prev_z_seq[-1:]])
