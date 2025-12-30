@@ -8,8 +8,9 @@ import json
 log = logging.getLogger(__name__)
 
 def load_model(checkpoint_dir: str, device: str = "cuda"):
-    cfg_path = os.path.join("outputs/learning", checkpoint_dir, ".hydra", "config.yaml")
-    weights_path = os.path.join(checkpoint_dir, "best_model.pt")
+    base_dir = os.path.join("outputs", "learning", checkpoint_dir)
+    cfg_path = os.path.join(base_dir, ".hydra", "config.yaml")
+    weights_path = os.path.join(base_dir, "best_model.pt")
 
     if not os.path.exists(cfg_path):
         raise FileNotFoundError(f"Config file not found at {cfg_path}")
@@ -26,7 +27,7 @@ def load_model(checkpoint_dir: str, device: str = "cuda"):
     model.eval()
 
     data_name = cfg.data.name
-    stats_path = os.path.join(checkpoint_dir, "stats", f"{data_name}_stats.json")
+    stats_path = os.path.join(base_dir, "stats", f"{data_name}_stats.json")
     if not os.path.exists(stats_path):
         raise FileNotFoundError(f"Stats file not found at {stats_path}")
     with open(stats_path, 'r') as f:

@@ -51,6 +51,7 @@ class BskKoopmanMPC(sysModel.SysModel):
 
         self.controller = KoopmanMPC(
             model=self.model,
+            processor=self.processor,
             device=device,
             **mpc_params,
         )
@@ -168,7 +169,8 @@ class BskKoopmanMPC(sysModel.SysModel):
 
 class KoopmanMPC:
     def __init__(self, 
-                 model, 
+                 model,
+                 processor,
                  horizon: int, 
                  u_min: float, 
                  u_max: float, 
@@ -178,11 +180,18 @@ class KoopmanMPC:
                  device: str = "cuda"):
         
         self.model = model
+        self.processor = processor
         self.horizon = horizon
         self.device = device
         self.latent_dim = model.latent_dim
         self.control_dim = model.control_dim
         
+        u_min_phys = np.full(self.control_dim, u_min)
+        u_max_phys = np.full(self.control_dim, u_max)
+        
+        u_min_norm = self.processor.normalize_control(torch.from_numpy(u_min_phys).float().to(self.processor.device)).cpu().numpy()
+        u_max_norm = self.processor.normalize_control(torch.from_numpy(u_max_phys).float().to(self.processor.device)).cpu().numpy()
+           
         self.z = cp.Variable((horizon + 1, self.latent_dim))
         self.u = cp.Variable((horizon, self.control_dim))
         
@@ -210,8 +219,9 @@ class KoopmanMPC:
         constraints = [self.z[0] == self.z_init]
         for k in range(horizon):
             constraints.append(self.z[k+1] == self.A_dyn @ self.z[k] + self.B_dyn @ self.u[k])
-            constraints.append(self.u[k] >= u_min)
-            constraints.append(self.u[k] <= u_max)
+            # Apply element-wise normalized constraints
+            constraints.append(self.u[k] >= u_min_norm)
+            constraints.append(self.u[k] <= u_max_norm)
             
         self.prob = cp.Problem(cp.Minimize(cost), constraints)
 
