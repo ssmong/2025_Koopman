@@ -6,6 +6,7 @@ import torch
 import numpy as np
 import cvxpy as cp
 import scipy.sparse as spa
+import traceback
 
 from Basilisk.architecture import sysModel, messaging
 from Basilisk.architecture import bskLogging
@@ -58,9 +59,13 @@ class BskKoopmanMPC(sysModel.SysModel):
 
         self.guidInMsg = messaging.AttGuidMsgReader()
         self.cmdTorqueOutMsg = messaging.CmdTorqueBodyMsg()
+        self.vehConfigInMsg = messaging.VehicleConfigMsgReader()
 
         x_ref = [1, 0, 0, 0, 0, 0, 0]
         self.x_ref_norm = self.processor.normalize_state(x_ref, is_expanded=False)
+        
+        if isinstance(self.x_ref_norm, torch.Tensor):
+            self.x_ref_norm = self.x_ref_norm.detach().cpu().numpy()
 
         self.x_history = deque(maxlen=self.hist_len)
         self.u_history = deque(maxlen=self.hist_len)
@@ -77,15 +82,13 @@ class BskKoopmanMPC(sysModel.SysModel):
         self.warmup_time = time
 
     def Reset(self, CurrentSimNanos):
-        log.info(f"BskKoopmanMPC: Reset called at {CurrentSimNanos}")
+        self.bskLogger.bskLog(bskLogging.BSK_INFORMATION, f"Reset called at {CurrentSimNanos}")
         if not self.guidInMsg.isLinked():
             self.bskLogger.bskLog(bskLogging.BSK_ERROR, "guidInMsg not linked")
             return
-
-        module_id = getattr(self, 'moduleID', 0)
         
         payload = messaging.CmdTorqueBodyMsgPayload()
-        self.cmdTorqueOutMsg.write(payload, CurrentSimNanos, module_id)
+        self.cmdTorqueOutMsg.write(payload, CurrentSimNanos)
 
         self.x_history.clear()
         self.u_history.clear()
@@ -124,8 +127,17 @@ class BskKoopmanMPC(sysModel.SysModel):
         x_curr = np.concatenate([ep_BR, omega_BR_B])
         x_curr_norm = self.processor.normalize_state(x_curr, is_expanded=False)
         
+        # Tensor일 경우 Numpy로 변환
+        if isinstance(x_curr_norm, torch.Tensor):
+            x_curr_norm = x_curr_norm.detach().cpu().numpy()
+        
         if self.last_hist_update_time < 0 or (current_time_sec - self.last_hist_update_time) >= self.hist_dt - 1e-6:
             u_prev_norm = self.processor.normalize_control(self.prev_u)
+            
+            # Tensor일 경우 Numpy로 변환
+            if isinstance(u_prev_norm, torch.Tensor):
+                u_prev_norm = u_prev_norm.detach().cpu().numpy()
+                
             self.x_history.append(x_curr_norm)
             self.u_history.append(u_prev_norm)
             self.last_hist_update_time = current_time_sec
@@ -255,14 +267,19 @@ class KoopmanMPC:
             x_hist_t = torch.FloatTensor(np.array(x_hist)).unsqueeze(0).to(self.device)
             u_hist_t = torch.FloatTensor(np.array(u_hist)).unsqueeze(0).to(self.device)
             x_curr_t = torch.FloatTensor(np.array(x_curr)).unsqueeze(0).to(self.device)
-            
-            A_val = self.model.get_A(x_hist_t, u_hist_t).squeeze(0)
-            B_val = self.model.get_B(x_hist_t, u_hist_t).squeeze(0)
-            
-            z_curr = self.model.encoder(x_curr_t).squeeze(0).cpu().numpy()
-    
             x_ref_t = torch.FloatTensor(np.array(x_ref)).unsqueeze(0).to(self.device)
-            z_ref_point = self.model.encoder(x_ref_t).squeeze(0).cpu().numpy()
+
+            # Use autocast for automatic mixed precision (handles FlashAttention requirements)
+            with torch.autocast(device_type="cuda", dtype=torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16):
+                A_val = self.model.get_A(x_hist_t, u_hist_t).squeeze(0)
+                B_val = self.model.get_B(x_hist_t, u_hist_t).squeeze(0)
+                z_curr = self.model.encoder(x_curr_t).squeeze(0)
+                z_ref_point = self.model.encoder(x_ref_t).squeeze(0)
+            
+            # Convert to float32/numpy for CVXPY
+            z_curr = z_curr.float().cpu().numpy()
+            z_ref_point = z_ref_point.float().cpu().numpy()
+            z_ref = np.tile(z_ref_point, (self.horizon + 1, 1))
             z_ref = np.tile(z_ref_point, (self.horizon + 1, 1))
             
         self.z_init.value = z_curr

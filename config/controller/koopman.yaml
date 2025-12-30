@@ -1,6 +1,6 @@
 _target_: sim.controller.koopman_mpc.BskKoopmanMPC
 
-checkpoint_dir: "2025-12-29/09-45-40"
+checkpoint_dir: "2025-12-24/14-26-34"
 device: "cuda"
 
 mpc_params:
