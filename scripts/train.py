@@ -261,8 +261,6 @@ def main(cfg: DictConfig):
         wandb.log(epoch_log, step=global_step)
 
         log_msg = [f"\nEpoch {epoch+1}/{epochs} Summary:"]
-        log_msg.append(f"{'Metric':<25} | {'Train':<12} | {'Val':<12}")
-        log_msg.append("-" * 55)
         
         # Sort keys (total to the front)
         all_keys = sorted(set(avg_train_metrics.keys()) | set(avg_val_metrics.keys()))
@@ -270,11 +268,32 @@ def main(cfg: DictConfig):
             all_keys.remove('loss/total')
             all_keys.insert(0, 'loss/total')
 
+        # Define column widths
+        metric_width = 15
+        val_width = 12
+
+        # Header
+        header = f"{'Type':<{metric_width}} | " + " | ".join([f"{k.replace('loss/', ''):<{val_width}}" for k in all_keys])
+        log_msg.append(header)
+        log_msg.append("-" * len(header))
+
+        # Train Row
+        train_row = f"{'Train':<{metric_width}} | "
+        train_vals = []
         for k in all_keys:
-            t_val = avg_train_metrics.get(k, float('nan'))
-            v_val = avg_val_metrics.get(k, float('nan'))
-            k_disp = k.replace("loss/", "")
-            log_msg.append(f"{k_disp:<25} | {t_val:<12.6f} | {v_val:<12.6f}")
+            val = avg_train_metrics.get(k, float('nan'))
+            train_vals.append(f"{val:<{val_width}.6f}")
+        train_row += " | ".join(train_vals)
+        log_msg.append(train_row)
+
+        # Val Row
+        val_row = f"{'Val':<{metric_width}} | "
+        val_vals = []
+        for k in all_keys:
+            val = avg_val_metrics.get(k, float('nan'))
+            val_vals.append(f"{val:<{val_width}.6f}")
+        val_row += " | ".join(val_vals)
+        log_msg.append(val_row)
             
         log.info("\n".join(log_msg))
 
