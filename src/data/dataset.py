@@ -211,7 +211,8 @@ class KoopmanDataset(Dataset):
         val_ratio: float = 0.1,
         normalization: bool = True,
         stats_dir: str = "data/stats",
-        device: str = "cpu"
+        device: str = "cpu",
+        use_loaded_stats: bool = False,
     ):
         super().__init__()
         
@@ -223,6 +224,8 @@ class KoopmanDataset(Dataset):
         self.state_key = state_key
         self.control_key = control_key
         
+        self.use_loaded_stats = use_loaded_stats
+
         self.processor = KoopmanDataProcessor(
             raw_state_dim=raw_state_dim,
             state_dim=state_dim,
@@ -263,7 +266,7 @@ class KoopmanDataset(Dataset):
              raise ValueError(f"Config state_dim ({self.state_dim}) != Expanded dim ({self.current_state_dim})")
 
         if self.processor.normalization:
-            if self.split == "train":
+            if self.split == "train" and not self.use_loaded_stats:
                 log.info("Computing stats from training data...")
                 stats_data = self._compute_stats()
                 

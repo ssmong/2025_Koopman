@@ -52,23 +52,25 @@ def main(cfg: DictConfig):
     test_steps = cfg.train.test_steps
     n_step_max = max(train_steps, val_steps, test_steps)
 
-    if cfg.train.get("pretrained_dir"):
-        pretrained_dir = cfg.train.pretrained_dir
-        stats_file_path = os.path.join("outputs", "learning", pretrained_dir, "stats", "attitude_stats.json")
-        stats_dir = os.path.dirname(stats_file_path) 
+    pretrained_dir = cfg.train.get("pretrained_dir")
 
-        if not os.path.exists(stats_file_path):
-            raise FileNotFoundError(f"Pretrained stats file not found at {stats_file_path}")
+    if pretrained_dir:
+        stats_dir = os.path.join("outputs", "learning", pretrained_dir, "stats")
+        if not os.path.exists(stats_dir):
+            raise FileNotFoundError(f"Pretrained stats directory not found at {stats_dir}")
         
-        log.info(f"Using pretrained stats from {stats_file_path}")
+        log.info(f"Using pretrained stats from {stats_dir}")
+        use_loaded_stats = True
     else:
         stats_dir = os.path.join(output_dir, "stats")
+        use_loaded_stats = False
 
     train_dataset = hydra.utils.instantiate(
         cfg.data, 
         split="train", 
         train_steps=train_steps,
-        stats_dir=stats_dir
+        stats_dir=stats_dir,
+        use_loaded_stats=use_loaded_stats
     )
     val_dataset = hydra.utils.instantiate(
         cfg.data, 
@@ -112,11 +114,11 @@ def main(cfg: DictConfig):
     else:
         raise RuntimeError("CUDA is not available. Please check your GPU configuration.")
 
-    if cfg.train.get("pretrained_dir"):
-        log.info(f"Fine-tuning mode: Loading from outputs/learning/{cfg.train.pretrained_dir}")
+    if pretrained_dir:
+        log.info(f"Fine-tuning mode: Loading from outputs/learning/{pretrained_dir}")
         model = load_finetune_model(
             cfg=cfg, 
-            pretrained_dir=cfg.train.pretrained_dir, 
+            pretrained_dir=pretrained_dir, 
             device=device,
             strict=False 
         )
