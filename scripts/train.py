@@ -291,8 +291,8 @@ def main(cfg: DictConfig):
             all_keys.remove('loss/total')
             all_keys.insert(0, 'loss/total')
 
-        metric_width = 15
-        val_width = 12
+        metric_width = 16
+        val_width = 13
 
         header = f"{'Type':<{metric_width}} | " + " | ".join([f"{k.replace('loss/', ''):<{val_width}}" for k in all_keys])
         log_msg.append(header)
