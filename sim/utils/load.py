@@ -21,7 +21,9 @@ def load_model(checkpoint_dir: str, device: str = "cuda"):
     
     log.info(f"Loading model from {weights_path}...")
     model = hydra.utils.instantiate(cfg.model)
-    model.load_state_dict(torch.load(weights_path, map_location=device), weights_only=True)
+    
+    state_dict = torch.load(weights_path, map_location=device, weights_only=True)
+    model.load_state_dict(state_dict)
 
     model.to(device)
     model.eval()
@@ -34,13 +36,14 @@ def load_model(checkpoint_dir: str, device: str = "cuda"):
         stats = json.load(f)
     
     stats_dict = {}
-    keys = ["mean", "std", "ctrl_mean", "ctrl_std"]
+    keys = ["mean", "std", "ctrl_mean", "ctrl_std", "min", "max", "ctrl_min", "ctrl_max"]
     for key in keys:
         if key in stats:
             stats_dict[key] = torch.tensor(stats[key], dtype=torch.float32, device=device)
         else:
-            raise ValueError(f"Key {key} not found in stats")
-
+            # raise ValueError(f"Key {key} not found in stats")
+            log.warning(f"Key {key} not found in stats, skipping...")
+            
     log.info(f"Loaded stats from {stats_path}")
 
     return model, cfg, stats_dict

@@ -283,7 +283,7 @@ def main(cfg: DictConfig):
         
         wandb.log(epoch_log, step=global_step)
 
-        log_msg = [f"\nEpoch {epoch+1}/{epochs} Summary:"]
+        log_msg = [f"Epoch {epoch+1}/{epochs} Summary:"]
         
         # Sort keys (total to the front)
         all_keys = sorted(set(avg_train_metrics.keys()) | set(avg_val_metrics.keys()))

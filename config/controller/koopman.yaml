@@ -5,8 +5,10 @@ device: "cuda"
 
 mpc_params:
   horizon: 30
-  Q_diag: [10.0, 10.0, 10.0, 10.0, 1.0, 1.0, 1.0]
+  Q_diag: [1.0]
   R_diag: [0.1, 0.1, 0.1]
-  F_diag: [50.0, 50.0, 50.0, 50.0, 5.0, 5.0, 5.0]
+  F_diag: [10.0]
+  rest_ratio: 1.0
   u_min: -1.0
   u_max: 1.0
+  

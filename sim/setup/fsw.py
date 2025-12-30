@@ -77,7 +77,7 @@ class FSW:
         self.bsk_sim.scSim.AddModelToTask(self.bsk_sim.fswTaskName, self.inertial3DObj, 90)
         
         # Convert Quaternion (Config) to MRP (Basilisk)
-        q_R0N = self.sim_cfg.target_attitude
+        q_R0N = list(self.sim_cfg.target_attitude)
         self.inertial3DObj.sigma_R0N = rbk.EP2MRP(q_R0N)
 
         self.attError = attTrackingError.attTrackingError()
@@ -103,10 +103,14 @@ class FSW:
              self.controller.warmup_time = self.sim_cfg.warmup_time
              
         # Priority 70
-        self.bsk_sim.scSim.AddModelToTask(self.bsk_sim.fswTaskName, self.controller, 70)
+        # self.bsk_sim.scSim.AddModelToTask(self.bsk_sim.fswTaskName, self.controller, 70)
+        from Basilisk.moduleTemplates import cModuleTemplate
+        self.dummy_controller = cModuleTemplate.cModuleTemplate()
+        self.dummy_controller.ModelTag = "DummyController"
+        self.bsk_sim.scSim.AddModelToTask(self.bsk_sim.fswTaskName, self.dummy_controller, 70)
         
         vehicleConfigOut = messaging.VehicleConfigMsgPayload()
-        vehicleConfigOut.ISCPntB_B = unitTestSupport.np2EigenMatrix3d(self.bsk_sim.sim_cfg.sc.inertia)
+        vehicleConfigOut.ISCPntB_B = list(self.bsk_sim.sim_cfg.sc.inertia)
         vcMsg = messaging.VehicleConfigMsg().write(vehicleConfigOut)
         
         if hasattr(self.controller, 'vehConfigInMsg'):

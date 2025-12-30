@@ -3,8 +3,8 @@ from Basilisk.simulation import (
     spacecraft,
     reactionWheelStateEffector,
     extForceTorque,
-    rwMotorTorque,
 )
+from Basilisk.fswAlgorithms import rwMotorTorque
 from Basilisk.utilities import (
     unitTestSupport,
     RigidBodyKinematics as rbk,
@@ -28,12 +28,12 @@ class Dynamics:
         self.scObject.ModelTag = self.sc_cfg.tag
 
         self.scObject.hub.mHub = self.sc_cfg.mass
-        self.scObject.hub.IHubPntBc_B = unitTestSupport.np2EigenMatrix3d(self.sc_cfg.inertia)
+        self.scObject.hub.IHubPntBc_B = unitTestSupport.np2EigenMatrix3d(list(self.sc_cfg.inertia))
 
-        q_BN = self.sc_cfg.init_attitude.q_BN
+        q_BN = list(self.sc_cfg.init_attitude.q_BN)
         sigma_BN = rbk.EP2MRP(q_BN)
         self.scObject.hub.sigma_BNInit = sigma_BN
-        self.scObject.hub.omega_BN_BInit = self.sc_cfg.init_attitude.omega_BN_B
+        self.scObject.hub.omega_BN_BInit = list(self.sc_cfg.init_attitude.omega_BN_B)
         
         self.bsk_sim.scSim.AddModelToTask(self.bsk_sim.simTaskName, self.scObject, 1)
         

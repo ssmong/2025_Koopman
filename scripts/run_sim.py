@@ -10,14 +10,10 @@ log = logging.getLogger(__name__)
 
 @hydra.main(config_path="../config", config_name="evaluate", version_base=None)
 def run(cfg: DictConfig):
-    log.info("\n" + "="*80)
-    log.info("SIMULATION CONFIGURATION")
-    log.info("="*80)
-    log.info(OmegaConf.to_yaml(cfg))
-    log.info("="*80 + "\n")
+    log.info("\n" + "="*80 + "\n")
 
     log.info("Initializing BskSim...")
-    sim = BskSim(cfg.sim, cfg.control)
+    sim = BskSim(cfg.sim, cfg.controller)
     
     log.info("Initializing Simulation Processes...")
     sim.init_simulation()

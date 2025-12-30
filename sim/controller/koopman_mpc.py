@@ -37,7 +37,7 @@ class BskKoopmanMPC(sysModel.SysModel):
             angle_indices=self.prev_cfg.data.angle_indices,
             quat_indices=self.prev_cfg.data.quat_indices,
             normalization=self.prev_cfg.data.normalization,
-            stats_dir=None,          
+            stats_dir="data/stats",          
             name=self.prev_cfg.data.name,
             device=device,
         )
@@ -76,7 +76,8 @@ class BskKoopmanMPC(sysModel.SysModel):
     def set_warmup_time(self, time: float):
         self.warmup_time = time
 
-    def Reset(self, CurrentSimNanos: int):        
+    def Reset(self, CurrentSimNanos):
+        log.info(f"BskKoopmanMPC: Reset called at {CurrentSimNanos}")
         if not self.guidInMsg.isLinked():
             self.bskLogger.bskLog(bskLogging.BSK_ERROR, "guidInMsg not linked")
             return
@@ -107,7 +108,7 @@ class BskKoopmanMPC(sysModel.SysModel):
 
         self.bskLogger.bskLog(bskLogging.BSK_INFORMATION, "Reset Koopman MPC successfully")
 
-    def UpdateState(self, CurrentSimNanos: int):
+    def UpdateState(self, CurrentSimNanos):
         current_time_sec = CurrentSimNanos * 1e-9
         
         if not self.guidInMsg.isLinked():
@@ -177,6 +178,7 @@ class KoopmanMPC:
                  Q_diag: list, 
                  R_diag: list,
                  F_diag: list,
+                 rest_ratio: float = 0.1,
                  device: str = "cuda"):
         
         self.model = model
@@ -189,8 +191,8 @@ class KoopmanMPC:
         u_min_phys = np.full(self.control_dim, u_min)
         u_max_phys = np.full(self.control_dim, u_max)
         
-        u_min_norm = self.processor.normalize_control(torch.from_numpy(u_min_phys).float().to(self.processor.device)).cpu().numpy()
-        u_max_norm = self.processor.normalize_control(torch.from_numpy(u_max_phys).float().to(self.processor.device)).cpu().numpy()
+        self.u_min_norm = self.processor.normalize_control(torch.from_numpy(u_min_phys).float().to(self.processor.device)).cpu().numpy()
+        self.u_max_norm = self.processor.normalize_control(torch.from_numpy(u_max_phys).float().to(self.processor.device)).cpu().numpy()
            
         self.z = cp.Variable((horizon + 1, self.latent_dim))
         self.u = cp.Variable((horizon, self.control_dim))
@@ -205,23 +207,39 @@ class KoopmanMPC:
         self.prev_u_seq = None
         self.last_solver_time = None
         
-        Q_np = np.array(Q_diag)
-        R_np = np.array(R_diag)
-        F_np = np.array(F_diag)
+        self.Q_np = np.array(Q_diag)
+        self.R_np = np.array(R_diag)
+        self.F_np = np.array(F_diag)
         
         cost = 0
+
+        # Expand Q and F matrices if they don't match latent dimension
+        if self.Q_np.shape[0] != self.latent_dim:
+            log.warning(f"Q_diag dimension {self.Q_np.shape[0]} != latent_dim {self.latent_dim}. Padding with defaults.")
+            Q_expanded = np.ones(self.latent_dim)
+            Q_expanded[:self.Q_np.shape[0]] = self.Q_np
+            Q_expanded[self.Q_np.shape[0]:] = np.mean(self.Q_np) * rest_ratio 
+            self.Q_np = Q_expanded
+
+        if self.F_np.shape[0] != self.latent_dim:
+             log.warning(f"F_diag dimension {self.F_np.shape[0]} != latent_dim {self.latent_dim}. Padding with defaults.")
+             F_expanded = np.ones(self.latent_dim)
+             F_expanded[:self.F_np.shape[0]] = self.F_np
+             F_expanded[self.F_np.shape[0]:] = np.mean(self.F_np) * rest_ratio
+             self.F_np = F_expanded
+             
         state_err = self.z[:-1] - self.z_ref[:-1]
-        cost += cp.sum(cp.multiply(Q_np, cp.square(state_err)))
-        cost += cp.sum(cp.multiply(R_np, cp.square(self.u)))
+        cost += cp.sum(cp.multiply(self.Q_np, cp.square(state_err)))
+        cost += cp.sum(cp.multiply(self.R_np, cp.square(self.u)))
         term_err = self.z[horizon] - self.z_ref[horizon]
-        cost += cp.sum(cp.multiply(F_np, cp.square(term_err)))
+        cost += cp.sum(cp.multiply(self.F_np, cp.square(term_err)))
 
         constraints = [self.z[0] == self.z_init]
         for k in range(horizon):
             constraints.append(self.z[k+1] == self.A_dyn @ self.z[k] + self.B_dyn @ self.u[k])
             # Apply element-wise normalized constraints
-            constraints.append(self.u[k] >= u_min_norm)
-            constraints.append(self.u[k] <= u_max_norm)
+            constraints.append(self.u[k] >= self.u_min_norm)
+            constraints.append(self.u[k] <= self.u_max_norm)
             
         self.prob = cp.Problem(cp.Minimize(cost), constraints)
 

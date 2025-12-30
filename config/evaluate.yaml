@@ -1,6 +1,6 @@
 defaults:
   - sim: sim_default
-  - control: koopman
+  - controller: koopman
   - _self_
 
 hydra:

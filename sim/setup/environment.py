@@ -50,7 +50,9 @@ class Environment:
         from Basilisk.utilities import simSetPlanetEnvironment
         simSetPlanetEnvironment.exponentialAtmosphere(self.atmo, 'earth')
         
-        self.bsk_sim.scSim.AddModelToTask(self.bsk_sim.simTaskName, self.atmo)
+        self.atmo.addSpacecraftToModel(self.bsk_sim.scObject.scStateOutMsg)
+        
+        self.bsk_sim.scSim.AddModelToTask(self.bsk_sim.simTaskName, self.atmo, 2)
 
     def _get_geometry_data(self):
         hub_cfg = self.geom_cfg.hub
@@ -90,7 +92,7 @@ class Environment:
             dragEffector.addFacet(panel_cfg.area, panel_cfg.coeff, normal, loc)
 
         self.bsk_sim.scObject.addDynamicEffector(dragEffector)
-        self.bsk_sim.scSim.AddModelToTask(self.bsk_sim.simTaskName, dragEffector)
+        self.bsk_sim.scSim.AddModelToTask(self.bsk_sim.simTaskName, dragEffector, 2)
 
     def _setup_srp(self):
         srpEffector = facetSRPDynamicEffector.FacetSRPDynamicEffector()
@@ -116,7 +118,7 @@ class Environment:
                                 panel_cfg.diff, panel_cfg.spec)
                                 
         self.bsk_sim.scObject.addDynamicEffector(srpEffector)
-        self.bsk_sim.scSim.AddModelToTask(self.bsk_sim.simTaskName, srpEffector)
+        self.bsk_sim.scSim.AddModelToTask(self.bsk_sim.simTaskName, srpEffector, 2)
 
     @staticmethod
     def normalToDcmF0B(nHat_B):
