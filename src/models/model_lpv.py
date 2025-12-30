@@ -130,6 +130,14 @@ class LPVModel(nn.Module):
             "z_traj": z_traj,
             "x_traj": x_traj,
         }
+
+        # --- Expose params for Backward/Consistency Losses ---
+        # Pass parameters instead of constructing full A matrix for analytic inversion
+        results["A_params"] = A_params
+        
+        batch_size = A_params.size(0)
+        results["B"] = B_flat.view(batch_size, self.latent_dim, self.control_dim)
+        results["u_future"] = u_future
         
         # 1. Latent Consistency: z_traj_re = E(x_traj) should match z_traj
         results["z_traj_re"] = self.encoder(x_traj) 

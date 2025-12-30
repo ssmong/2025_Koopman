@@ -62,3 +62,35 @@ targets:
 
     min_scale: 1.0
     sample_size: 512
+
+  # 5. Backward Step-wise Prediction Loss
+  # z_t = A^-1(z_{t+1} - B u_t) for all t
+  backward_step:
+    _target_: src.losses.components.backward.BackwardStepLoss
+
+    n_step_max: ${..._n_step_max}
+    weight_decay: ${..._decay}
+
+    weight: 0.01
+
+    key_z: z_traj_gt
+    key_A_params: A_params
+    key_B: B
+    key_u: u_future
+    eigval_max: ${model.eigval_max}
+
+  # 6. Backward Rolling Prediction Loss
+  # Start from z_{t+N}, roll back to z_t
+  backward_rolling:
+    _target_: src.losses.components.backward.BackwardRollingLoss
+
+    n_step_max: ${..._n_step_max}
+    weight_decay: 1.0 # Not used for rolling loss
+
+    weight: 0.01
+
+    key_z: z_traj_gt
+    key_A_params: A_params
+    key_B: B
+    key_u: u_future
+    eigval_max: ${model.eigval_max}
