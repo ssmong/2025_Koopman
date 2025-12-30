@@ -14,6 +14,8 @@ train_steps: 100
 val_steps: ${.test_steps}
 test_steps: 100
 
+pretrained_dir: null
+
 seq_strategy:
   warmup_epochs: 10
   warmup_steps: 5

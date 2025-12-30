@@ -11,6 +11,7 @@ from hydra.core.hydra_config import HydraConfig
 import wandb
 
 from src.utils.plot import plot_trajectory
+from src.utils.load import load_finetune_model
 
 log = logging.getLogger(__name__)
 
@@ -27,7 +28,6 @@ def main(cfg: DictConfig):
     rel_path = os.path.relpath(output_dir, orig_cwd)
 
     run_name = rel_path.replace(os.path.sep, "_")
-    # Remove 'outputs_learning_' prefix if present
     if run_name.startswith("outputs_learning_"):
         run_name = run_name[len("outputs_learning_"):]
 
@@ -41,6 +41,7 @@ def main(cfg: DictConfig):
         name=run_name,
         id=run_name
     )
+
     # ------------------------------------------------------------------
     #       1. Dataset & DataLoader
     # ------------------------------------------------------------------
@@ -51,7 +52,17 @@ def main(cfg: DictConfig):
     test_steps = cfg.train.test_steps
     n_step_max = max(train_steps, val_steps, test_steps)
 
-    stats_dir = os.path.join(output_dir, "stats")
+    if cfg.train.get("pretrained_dir"):
+        pretrained_dir = cfg.train.pretrained_dir
+        stats_file_path = os.path.join("outputs", "learning", pretrained_dir, "stats", "attitude_stats.json")
+        stats_dir = os.path.dirname(stats_file_path) 
+
+        if not os.path.exists(stats_file_path):
+            raise FileNotFoundError(f"Pretrained stats file not found at {stats_file_path}")
+        
+        log.info(f"Using pretrained stats from {stats_file_path}")
+    else:
+        stats_dir = os.path.join(output_dir, "stats")
 
     train_dataset = hydra.utils.instantiate(
         cfg.data, 
@@ -95,13 +106,23 @@ def main(cfg: DictConfig):
     #       2. Model & Optimizer & Scheduler & Loss
     # ------------------------------------------------------------------
     log.info(f"Initializing model...")
-    model = hydra.utils.instantiate(cfg.model)
 
     if torch.cuda.is_available():
         device = torch.device("cuda")
-        model.to(device)
     else:
         raise RuntimeError("CUDA is not available. Please check your GPU configuration.")
+
+    if cfg.train.get("pretrained_dir"):
+        log.info(f"Fine-tuning mode: Loading from outputs/learning/{cfg.train.pretrained_dir}")
+        model = load_finetune_model(
+            cfg=cfg, 
+            pretrained_dir=cfg.train.pretrained_dir, 
+            device=device,
+            strict=False 
+        )
+    else:
+        model = hydra.utils.instantiate(cfg.model)
+        model.to(device)
     
     criterion = hydra.utils.instantiate(cfg.loss, n_step_max=n_step_max)
     criterion.bind_model(model)
@@ -268,16 +289,13 @@ def main(cfg: DictConfig):
             all_keys.remove('loss/total')
             all_keys.insert(0, 'loss/total')
 
-        # Define column widths
         metric_width = 15
         val_width = 12
 
-        # Header
         header = f"{'Type':<{metric_width}} | " + " | ".join([f"{k.replace('loss/', ''):<{val_width}}" for k in all_keys])
         log_msg.append(header)
         log_msg.append("-" * len(header))
 
-        # Train Row
         train_row = f"{'Train':<{metric_width}} | "
         train_vals = []
         for k in all_keys:
@@ -286,7 +304,6 @@ def main(cfg: DictConfig):
         train_row += " | ".join(train_vals)
         log_msg.append(train_row)
 
-        # Val Row
         val_row = f"{'Val':<{metric_width}} | "
         val_vals = []
         for k in all_keys:
@@ -395,13 +412,11 @@ def main(cfg: DictConfig):
                     std=train_dataset.processor.std
                 )
                 
-                # [WandB] Upload plot to WandB
                 wandb.log({"test/trajectory_plot": wandb.Image(plot_save_path)})
                 log.info(f"Test plot uploaded to WandB and saved to {plot_save_path}")
                 break
 
     wandb.finish()
-        
 
 if __name__ == "__main__":
     main()
