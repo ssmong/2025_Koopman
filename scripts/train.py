@@ -27,6 +27,9 @@ def main(cfg: DictConfig):
     rel_path = os.path.relpath(output_dir, orig_cwd)
 
     run_name = rel_path.replace(os.path.sep, "_")
+    # Remove 'outputs_learning_' prefix if present
+    if run_name.startswith("outputs_learning_"):
+        run_name = run_name[len("outputs_learning_"):]
 
     wandb_cfg = OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True)
     wandb.init(
