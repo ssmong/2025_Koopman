@@ -29,6 +29,7 @@ class BskKoopmanMPC(sysModel.SysModel):
         self.ModelTag = "KoopmanMPC"
 
         self.model, self.prev_cfg, self.stats_dict = load_model(checkpoint_dir, device)
+        
         self.device = device
 
         self.processor = KoopmanDataProcessor(
@@ -214,7 +215,10 @@ class KoopmanMPC:
         self.z_init = cp.Parameter(self.latent_dim)
         self.z_ref = cp.Parameter((horizon + 1, self.latent_dim))
         
-        self.A_dyn = cp.Parameter((self.latent_dim, self.latent_dim)) 
+        # A is block-diagonal (theoretically sparse ~6% non-zeros), but CVXPY Parameter
+        # doesn't properly support time-varying sparse matrices. Use dense instead.
+        # OSQP will still detect sparsity in the KKT system during solve.
+        self.A_dyn = cp.Parameter((self.latent_dim, self.latent_dim))
         self.B_dyn = cp.Parameter((self.latent_dim, self.control_dim))
 
         self.prev_z_seq = None
@@ -257,6 +261,57 @@ class KoopmanMPC:
             
         self.prob = cp.Problem(cp.Minimize(cost), constraints)
 
+    def _get_A_safe(self, x_history: torch.Tensor, u_history: torch.Tensor):
+        ctxt = torch.cat([x_history, u_history], dim=-1)
+        
+        dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+        with torch.autocast(device_type="cuda", dtype=dtype):
+            h, _, _ = self.model.ctxt_encoder(ctxt)
+            
+        h = h.float()
+        A_params = self.model._to_A(h)
+
+        batch_size = A_params.size(0)
+        n_blocks = self.model.latent_dim // 2
+
+        log_r = A_params[:, :n_blocks]
+        theta = A_params[:, n_blocks:]
+
+        r = self.model.eigval_max * torch.sigmoid(log_r)
+        c = torch.cos(theta)
+        s = torch.sin(theta)
+
+        A = torch.zeros(batch_size, self.model.latent_dim, self.model.latent_dim, device=A_params.device, dtype=A_params.dtype)
+        
+        indices = torch.arange(n_blocks, device=A_params.device)
+        even_indices = 2 * indices
+        odd_indices = 2 * indices + 1
+
+        rc = r * c
+        A[:, even_indices, even_indices] = rc
+        A[:, odd_indices, odd_indices] = rc
+        
+        rs = r * s
+        A[:, even_indices, odd_indices] = -rs
+        A[:, odd_indices, even_indices] = rs
+        
+        return A
+
+    def _get_B_safe(self, x_history: torch.Tensor, u_history: torch.Tensor):
+        ctxt = torch.cat([x_history, u_history], dim=-1)
+        
+        dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+        with torch.autocast(device_type="cuda", dtype=dtype):
+            h, _, _ = self.model.ctxt_encoder(ctxt)
+            
+        h = h.float()
+        B_flat = self.model._to_B(h)
+
+        batch_size = B_flat.size(0)
+        B = B_flat.view(batch_size, self.model.latent_dim, self.model.control_dim)
+
+        return B
+
     def getControl(self, obs: dict):
         x_ref  = obs["x_ref"]
         x_curr = obs["x_curr"]
@@ -269,25 +324,22 @@ class KoopmanMPC:
             x_curr_t = torch.FloatTensor(np.array(x_curr)).unsqueeze(0).to(self.device)
             x_ref_t = torch.FloatTensor(np.array(x_ref)).unsqueeze(0).to(self.device)
 
-            # Use autocast for automatic mixed precision (handles FlashAttention requirements)
-            with torch.autocast(device_type="cuda", dtype=torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16):
-                A_val = self.model.get_A(x_hist_t, u_hist_t).squeeze(0)
-                B_val = self.model.get_B(x_hist_t, u_hist_t).squeeze(0)
-                z_curr = self.model.encoder(x_curr_t).squeeze(0)
-                z_ref_point = self.model.encoder(x_ref_t).squeeze(0)
+            A_val = self._get_A_safe(x_hist_t, u_hist_t).squeeze(0)
+            B_val = self._get_B_safe(x_hist_t, u_hist_t).squeeze(0)
             
-            # Convert to float32/numpy for CVXPY
-            z_curr = z_curr.float().cpu().numpy()
-            z_ref_point = z_ref_point.float().cpu().numpy()
+            z_curr = self.model.encoder(x_curr_t).squeeze(0).cpu().numpy()
+            z_ref_point = self.model.encoder(x_ref_t).squeeze(0).cpu().numpy()
+            
             z_ref = np.tile(z_ref_point, (self.horizon + 1, 1))
             z_ref = np.tile(z_ref_point, (self.horizon + 1, 1))
             
         self.z_init.value = z_curr
         self.z_ref.value = z_ref
         
-        A_val_np = A_val.cpu().numpy()
-        self.A_dyn.value = spa.csc_matrix(A_val_np)
-        self.B_dyn.value = B_val.cpu().numpy()
+        # A is block-diagonal (~6% non-zeros), but use dense for CVXPY compatibility
+        # OSQP detects and exploits sparsity internally during KKT factorization
+        self.A_dyn.value = A_val.float().cpu().numpy()
+        self.B_dyn.value = B_val.float().cpu().numpy()
 
         if self.prev_z_seq is not None:
             self.z.value = np.vstack([self.prev_z_seq[1:], self.prev_z_seq[-1:]])
