@@ -103,18 +103,14 @@ class FSW:
              self.controller.warmup_time = self.sim_cfg.warmup_time
              
         # Priority 70
-        # self.bsk_sim.scSim.AddModelToTask(self.bsk_sim.fswTaskName, self.controller, 70)
-        from Basilisk.moduleTemplates import cModuleTemplate
-        self.dummy_controller = cModuleTemplate.cModuleTemplate()
-        self.dummy_controller.ModelTag = "DummyController"
-        self.bsk_sim.scSim.AddModelToTask(self.bsk_sim.fswTaskName, self.dummy_controller, 70)
+        self.bsk_sim.scSim.AddModelToTask(self.bsk_sim.fswTaskName, self.controller, 70)
         
         vehicleConfigOut = messaging.VehicleConfigMsgPayload()
         vehicleConfigOut.ISCPntB_B = list(self.bsk_sim.sim_cfg.sc.inertia)
-        vcMsg = messaging.VehicleConfigMsg().write(vehicleConfigOut)
+        self.vcMsg = messaging.VehicleConfigMsg().write(vehicleConfigOut)
         
         if hasattr(self.controller, 'vehConfigInMsg'):
-            self.controller.vehConfigInMsg.subscribeTo(vcMsg)
+            self.controller.vehConfigInMsg.subscribeTo(self.vcMsg)
         
         if hasattr(self.controller, 'guidInMsg'):
             self.controller.guidInMsg.subscribeTo(self.attError.attGuidOutMsg)

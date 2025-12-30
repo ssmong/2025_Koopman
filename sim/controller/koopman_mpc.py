@@ -81,9 +81,11 @@ class BskKoopmanMPC(sysModel.SysModel):
         if not self.guidInMsg.isLinked():
             self.bskLogger.bskLog(bskLogging.BSK_ERROR, "guidInMsg not linked")
             return
+
+        module_id = getattr(self, 'moduleID', 0)
         
         payload = messaging.CmdTorqueBodyMsgPayload()
-        self.cmdTorqueOutMsg.write(payload, CurrentSimNanos, self.moduleID)
+        self.cmdTorqueOutMsg.write(payload, CurrentSimNanos, module_id)
 
         self.x_history.clear()
         self.u_history.clear()
