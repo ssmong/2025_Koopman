@@ -346,7 +346,6 @@ class KoopmanMPC:
 
             A_val = self._get_A_safe(x_hist_t, u_hist_t).squeeze(0)
             B_val = self._get_B_safe(x_hist_t, u_hist_t).squeeze(0)
-            
             z_curr = self.model.encoder(x_curr_t).squeeze(0).cpu().numpy()
             z_ref_point = self.model.encoder(x_ref_t).squeeze(0).cpu().numpy()
             
@@ -374,7 +373,7 @@ class KoopmanMPC:
                 eps_rel=1e-3,
                 adaptive_rho=True,
                 polish=False,
-                verbose=True
+                verbose=False
             )
             self.last_solver_time = self.prob.solver_stats.solve_time
             
