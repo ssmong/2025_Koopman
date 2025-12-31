@@ -23,6 +23,7 @@ class BskKoopmanMPC(sysModel.SysModel):
         self,
         checkpoint_dir: str,
         mpc_params: Dict,
+        ctrl_dt: float = 1.0,
         device: str = "cuda"
         ):
         super().__init__()
@@ -31,6 +32,8 @@ class BskKoopmanMPC(sysModel.SysModel):
         self.model, self.prev_cfg, self.stats_dict = load_model(checkpoint_dir, device)
         
         self.device = device
+        self.ctrl_dt = ctrl_dt
+        self.last_ctrl_update_time = -self.ctrl_dt
 
         self.processor = KoopmanDataProcessor(
             raw_state_dim=self.prev_cfg.data.raw_state_dim,
@@ -95,6 +98,7 @@ class BskKoopmanMPC(sysModel.SysModel):
         self.u_history.clear()
         self.prev_u = np.zeros(self.control_dim)
         self.last_hist_update_time = -1.0
+        self.last_ctrl_update_time = -self.ctrl_dt
 
         if self.guidInMsg.isWritten():
             guid_msg = self.guidInMsg()
@@ -128,14 +132,13 @@ class BskKoopmanMPC(sysModel.SysModel):
         x_curr = np.concatenate([ep_BR, omega_BR_B])
         x_curr_norm = self.processor.normalize_state(x_curr, is_expanded=False)
         
-        # Tensor일 경우 Numpy로 변환
         if isinstance(x_curr_norm, torch.Tensor):
             x_curr_norm = x_curr_norm.detach().cpu().numpy()
         
+        # --- Update History (Always based on history time step) ---
         if self.last_hist_update_time < 0 or (current_time_sec - self.last_hist_update_time) >= self.hist_dt - 1e-6:
             u_prev_norm = self.processor.normalize_control(self.prev_u)
             
-            # Tensor일 경우 Numpy로 변환
             if isinstance(u_prev_norm, torch.Tensor):
                 u_prev_norm = u_prev_norm.detach().cpu().numpy()
                 
@@ -143,7 +146,9 @@ class BskKoopmanMPC(sysModel.SysModel):
             self.u_history.append(u_prev_norm)
             self.last_hist_update_time = current_time_sec
 
+        # --- Control Update (Decimated) ---
         if current_time_sec < self.warmup_time:
+             # Warmup: Output zero torque, but continue updating history
             u_opt = np.zeros(self.control_dim)
             self.prev_u = u_opt
             
@@ -151,6 +156,20 @@ class BskKoopmanMPC(sysModel.SysModel):
             out_payload.torqueRequestBody = u_opt.tolist()
             self.cmdTorqueOutMsg.write(out_payload, CurrentSimNanos, self.moduleID)
             return
+
+        # Check if it's time for new control (based on ctrl_dt)
+        if self.last_ctrl_update_time < 0 or (current_time_sec - self.last_ctrl_update_time) >= self.ctrl_dt - 1e-6:
+             self.last_ctrl_update_time = current_time_sec
+        else:
+             # Not time yet: Hold previous control
+             # Basilisk modules run at task rate. If we don't write new message, it might hold old value depending on reader?
+             # But CmdTorqueBodyMsg is usually read every step by dynamics.
+             # We should write the SAME torque as before to be safe/explicit, or rely on zero-order hold behavior of effector.
+             # Let's write previous u.
+             out_payload = messaging.CmdTorqueBodyMsgPayload()
+             out_payload.torqueRequestBody = self.prev_u.tolist()
+             self.cmdTorqueOutMsg.write(out_payload, CurrentSimNanos, self.moduleID)
+             return
 
         obs = {
             "x_curr": x_curr_norm,
@@ -183,6 +202,7 @@ class BskKoopmanMPC(sysModel.SysModel):
         out_payload.torqueRequestBody = u_opt.tolist()
         self.cmdTorqueOutMsg.write(out_payload, CurrentSimNanos, self.moduleID)
 
+
 class KoopmanMPC:
     def __init__(self, 
                  model,
@@ -193,7 +213,7 @@ class KoopmanMPC:
                  Q_diag: list, 
                  R_diag: list,
                  F_diag: list,
-                 rest_ratio: float = 0.1,
+                 rest_ratio: float = 1,
                  device: str = "cuda"):
         
         self.model = model
@@ -336,8 +356,6 @@ class KoopmanMPC:
         self.z_init.value = z_curr
         self.z_ref.value = z_ref
         
-        # A is block-diagonal (~6% non-zeros), but use dense for CVXPY compatibility
-        # OSQP detects and exploits sparsity internally during KKT factorization
         self.A_dyn.value = A_val.float().cpu().numpy()
         self.B_dyn.value = B_val.float().cpu().numpy()
 
@@ -355,13 +373,11 @@ class KoopmanMPC:
                 eps_abs=1e-3,
                 eps_rel=1e-3,
                 adaptive_rho=True,
-                polish=False
+                polish=False,
+                verbose=True
             )
-            # Try to get solver time
-            if hasattr(self.prob, 'solver_stats') and self.prob.solver_stats is not None:
-                self.last_solver_time = self.prob.solver_stats.solve_time
-            else:
-                self.last_solver_time = None
+            self.last_solver_time = self.prob.solver_stats.solve_time
+            
                 
         except cp.SolverError:
             log.error("Solver error in Koopman MPC: cp.SolverError")

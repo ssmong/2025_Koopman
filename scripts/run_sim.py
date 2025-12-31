@@ -42,9 +42,13 @@ from Basilisk.utilities import simIncludeGravBody
 from Basilisk.utilities import simIncludeRW
 from Basilisk.utilities import vizSupport
 
+import torch
+
 # Custom Plotting Imports
 from sim.utils.plot import (
-    plot_attitude_error,
+    plot_quaternion_error,
+    plot_angle_error,
+    plot_latent_error,
     plot_rate_error,
     plot_torque,
     plot_rw_motor_torque,
@@ -120,7 +124,7 @@ def run(cfg: DictConfig):
 
     dynProcess = scSim.CreateNewProcess(simProcessName)
     dynProcess.addTask(scSim.CreateNewTask(simTaskName, simulationTimeStep))
-
+    
     # -------------------------------------------------------------------------
     # 3. Spacecraft Setup
     # -------------------------------------------------------------------------
@@ -395,25 +399,37 @@ def run(cfg: DictConfig):
         from sim.controller.koopman_mpc import BskKoopmanMPC
         
         mpc_params = dict(cfg.controller.mpc_params)
+        
+        # NOTE: Run this task at 0.1s (history update rate).
+        # Internal logic handles 1s control update.
+        hist_dt = 0.1 # This should match history dt in training data
+        histTaskName = "histCtrlTask"
+        histTimeStep = macros.sec2nano(hist_dt)
+        dynProcess.addTask(scSim.CreateNewTask(histTaskName, histTimeStep))
             
         torqueControl = BskKoopmanMPC(
             checkpoint_dir=cfg.controller.checkpoint_dir,
             mpc_params=mpc_params,
+            ctrl_dt=cfg.sim.ctrl_dt,
             device=cfg.controller.get("device", "cpu")
         )
         torqueControl.ModelTag = "KoopmanMPC"
-        scSim.AddModelToTask(simTaskName, torqueControl)
+        scSim.AddModelToTask(histTaskName, torqueControl)
         
         if hasattr(torqueControl, 'set_warmup_time'):
             torqueControl.set_warmup_time(warmup_time)
             
     else:
-        # Default to Random
+        # Default to Random - Run at ctrl_dt (e.g. 1s)
+        ctrlTaskName = "ctrlTask"
+        ctrlTimeStep = macros.sec2nano(cfg.sim.ctrl_dt)
+        dynProcess.addTask(scSim.CreateNewTask(ctrlTaskName, ctrlTimeStep))
+        
         bsk_logger.bskLog(bskLogging.BSK_INFORMATION, f"Controller type (Target: {ctl_target}) is unknown. Defaulting to Random Torque Controller")
         from Basilisk.ExternalModules import randomTorque
         torqueControl = randomTorque.RandomTorque()
         torqueControl.ModelTag = "randomTorque"
-        scSim.AddModelToTask(simTaskName, torqueControl)
+        scSim.AddModelToTask(ctrlTaskName, torqueControl)
         torqueControl.setTorqueMagnitude(1)
         torqueControl.setSeed(rngSeed)
 
@@ -531,14 +547,74 @@ def run(cfg: DictConfig):
     # Filter warmup
     mask = timeAxis >= warmup_time
     
+    # Process Quaternion and Angle Error
+    dataEPBR = []
+    dataAngleError = []
+    for sigma in dataSigmaBR:
+        ep = rbk.MRP2EP(sigma)
+        dataEPBR.append(ep)
+        # Angle error: 4 * arctan(norm(sigma))
+        angle = 4.0 * np.arctan(np.linalg.norm(sigma))
+        dataAngleError.append(angle)
+    
+    dataEPBR = np.array(dataEPBR)
+    dataAngleError = np.array(dataAngleError)
+
     # Save processed data
     save_data = {
         "time": timeAxis[mask] - warmup_time,
         "sigma_BR": dataSigmaBR[mask],
+        "ep_BR": dataEPBR[mask],
+        "angle_error": dataAngleError[mask],
         "omega_BR": dataOmegaBR[mask],
         "u_cmd": dataTorque[mask]
     }
     
+    # Latent Error Calculation (if BskKoopmanMPC)
+    if "BskKoopmanMPC" in ctl_target and hasattr(torqueControl, "model"):
+        try:
+            model = torqueControl.model
+            processor = torqueControl.processor
+            device = torqueControl.device
+            
+            # Target state: [1, 0, 0, 0, 0, 0, 0]
+            x_ref = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+            x_ref_norm = processor.normalize_state(x_ref, is_expanded=False)
+            if isinstance(x_ref_norm, np.ndarray):
+                x_ref_norm = torch.FloatTensor(x_ref_norm).to(device)
+            elif isinstance(x_ref_norm, torch.Tensor):
+                x_ref_norm = x_ref_norm.to(device)
+
+            # Get z_ref
+            with torch.no_grad():
+                z_ref = model.encoder(x_ref_norm.unsqueeze(0)).squeeze(0) # (latent_dim,)
+            
+            # Prepare batch data (Post-warmup)
+            ep_masked = save_data["ep_BR"]
+            omega_masked = save_data["omega_BR"]
+            x_batch_np = np.hstack([ep_masked, omega_masked]) # (N, 7)
+            
+            # Normalize batch
+            x_batch_list = []
+            for i in range(len(x_batch_np)):
+                x_norm = processor.normalize_state(x_batch_np[i], is_expanded=False)
+                if isinstance(x_norm, torch.Tensor):
+                    x_norm = x_norm.cpu().numpy()
+                x_batch_list.append(x_norm)
+            
+            x_batch_norm = np.array(x_batch_list)
+            x_batch_t = torch.FloatTensor(x_batch_norm).to(device)
+            
+            with torch.no_grad():
+                z_batch = model.encoder(x_batch_t) # (N, latent_dim)
+                diff = z_batch - z_ref.unsqueeze(0)
+                dist = torch.norm(diff, p=2, dim=1).cpu().numpy()
+            
+            save_data["latent_error"] = dist
+            
+        except Exception as e:
+            bsk_logger.bskLog(bskLogging.BSK_WARNING, f"Failed to compute latent error: {e}")
+
     if useRW:
         save_data["u_rw"] = rwMotorTorqueLog.motorTorque[mask]
         save_data["omega_rw"] = rwStateLog.wheelSpeeds[mask]
@@ -550,9 +626,18 @@ def run(cfg: DictConfig):
     # -------------------------------------------------------------------------
     # 14. Plotting
     # -------------------------------------------------------------------------
-    # Plot 1: Attitude Error
-    plot_attitude_error(save_data["time"], save_data["sigma_BR"], position=(100, 100))
-    plt.savefig(os.path.join(figureDir, "attitude_error.png"), dpi=150, bbox_inches='tight')
+    # Plot 1: Quaternion Error
+    plot_quaternion_error(save_data["time"], save_data["ep_BR"], position=(100, 100))
+    plt.savefig(os.path.join(figureDir, "quaternion_error.png"), dpi=150, bbox_inches='tight')
+
+    # Plot 1b: Angle Error
+    plot_angle_error(save_data["time"], save_data["angle_error"], position=(500, 100))
+    plt.savefig(os.path.join(figureDir, "angle_error.png"), dpi=150, bbox_inches='tight')
+    
+    # Plot 1c: Latent Error (if available)
+    if "latent_error" in save_data:
+        plot_latent_error(save_data["time"], save_data["latent_error"], position=(500, 500))
+        plt.savefig(os.path.join(figureDir, "latent_error.png"), dpi=150, bbox_inches='tight')
     
     # Plot 2: Rate Error
     plot_rate_error(save_data["time"], save_data["omega_BR"], position=(100, 800))
