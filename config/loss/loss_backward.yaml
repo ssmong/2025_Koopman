@@ -1,7 +1,15 @@
 _target_: src.losses.objective.Objective
 
-_decay: 0.99
-_n_step_max: ${max:${train.train_steps}, ${train.val_steps}, ${train.test_steps}}
+n_step_max: ${max:${train.train_steps}, ${train.val_steps}, ${train.test_steps}}
+decay: 0.99
+
+weights:
+  pred_x: 1.0
+  pred_z: 1.0
+  recon_z: 0.1
+  isometric: 0.01
+  backward_step: 0.01
+  backward_roll: 0.01
 
 targets:
   # 1. Prediction Loss: || x_gt - D(z_pred) ||^2
@@ -9,10 +17,10 @@ targets:
   pred_x:
     _target_: src.losses.components.quat.QuatLoss
 
-    n_step_max: ${..._n_step_max}
-    weight_decay: ${..._decay}
+    n_step_max: ${...n_step_max}
+    weight_decay: ${...decay}
 
-    weight: 1.0
+    weight: ${...weights.pred_x}
     key_pred: x_traj          # [B, N+1, D]
     key_target: x_traj_gt     # [B, N+1, D]
     quat_indices: ${data.quat_indices}
@@ -24,10 +32,10 @@ targets:
   pred_z:
     _target_: src.losses.components.base.BaseLoss
 
-    n_step_max: ${..._n_step_max}
-    weight_decay: ${..._decay}
+    n_step_max: ${...n_step_max}
+    weight_decay: ${...decay}
     
-    weight: 1.0
+    weight: ${...weights.pred_z}
     key_pred: z_traj          # [B, N+1, D]
     key_target: z_traj_gt     # [B, N+1, D]
 
@@ -36,10 +44,10 @@ targets:
   recon_z:
     _target_: src.losses.components.base.BaseLoss
 
-    n_step_max: ${..._n_step_max}
-    weight_decay: ${..._decay}
+    n_step_max: ${...n_step_max}
+    weight_decay: ${...decay}
 
-    weight: 0.1 
+    weight: ${...weights.recon_z}
     key_pred: z_traj_re       
     key_target: z_traj        
 
@@ -48,10 +56,10 @@ targets:
   isometric:
     _target_: src.losses.components.isometry.IsometryLoss
 
-    n_step_max: ${..._n_step_max}
-    weight_decay: ${..._decay}
+    n_step_max: ${...n_step_max}
+    weight_decay: ${...decay}
 
-    weight: 0.1
+    weight: ${...weights.isometric}
 
     key_pred: z_traj_gt
     key_target: x_traj_gt
@@ -68,10 +76,10 @@ targets:
   backward_step:
     _target_: src.losses.components.backward.BackwardStepLoss
 
-    n_step_max: ${..._n_step_max}
-    weight_decay: ${..._decay}
+    n_step_max: ${...n_step_max}
+    weight_decay: ${...decay}
 
-    weight: 0.01
+    weight: ${...weights.backward_step}
 
     key_z: z_traj_gt
     key_A_params: A_params
@@ -84,10 +92,10 @@ targets:
   backward_roll:
     _target_: src.losses.components.backward.BackwardRollingLoss
 
-    n_step_max: ${..._n_step_max}
+    n_step_max: ${...n_step_max}
     weight_decay: 1.0 # Not used for rolling loss
 
-    weight: 0.01
+    weight: ${...weights.backward_roll}
 
     key_z: z_traj_gt
     key_A_params: A_params

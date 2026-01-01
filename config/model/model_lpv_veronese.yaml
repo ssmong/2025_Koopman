@@ -1,0 +1,44 @@
+_target_: src.models.model_lpv.LPVModel
+_recursive_: False
+
+defaults:
+  - context: kimi
+  - matrix: linear
+  - _self_
+
+# -----------------------------------------------------------------------
+# [1] Shared Hyperparameters (Standard Naming)
+# -----------------------------------------------------------------------
+hidden_size: 256
+num_layers: 3
+
+state_dim: ${data.state_dim}
+control_dim: ${data.control_dim}
+latent_dim: 32
+eigval_max: 1.01
+
+quat_indices: ${data.quat_indices}
+
+# -----------------------------------------------------------------------
+# [2] Backbone Definition Template
+# -----------------------------------------------------------------------
+_backbone_template_: &backbone_common
+  _target_: src.models.components.block_resnet.ResNetBlock
+  hidden_size: ${..hidden_size}
+  num_layers: ${..num_layers}
+  use_norm: true
+  activation: 
+    _target_: torch.nn.SiLU
+
+# -----------------------------------------------------------------------
+# [3] Components Assembly
+# -----------------------------------------------------------------------
+lifting:
+  _target_: src.models.components.lifting_struct.QuatVeroneseLifting
+  quat_indices: ${..quat_indices} 
+  backbone: *backbone_common
+
+decoding:
+  _target_: src.models.components.lifting_struct.QuatVeroneseDecoding
+  quat_indices: ${..quat_indices}
+  backbone: *backbone_common

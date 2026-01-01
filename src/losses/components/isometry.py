@@ -80,3 +80,69 @@ class IsometryLoss(QuatLoss):
         # Isometry Loss is not applicable to time axis due to sampling
         # Simply perform weight mulpvplication and return
         return self.weight * loss
+
+
+class PartialIsometryLoss(BaseLoss):
+    def __init__(self, 
+                 exclude_x_idx: list = None, 
+                 exclude_z_idx: list = None, 
+                 min_scale: float = 1.0,
+                 sample_size: int = 512,
+                 **kwargs):
+        super().__init__(**kwargs)
+    
+        self.exclude_x_idx = set(exclude_x_idx) if exclude_x_idx else None
+        self.exclude_z_idx = set(exclude_z_idx) if exclude_z_idx else None
+        
+        self.min_scale = min_scale
+        self.sample_size = sample_size
+        
+        # Learnable scale parameter: s = min_scale + Softplus(param)
+        self.scale_param = nn.Parameter(torch.zeros(1))
+
+    def _compute_dist_sq(self, x: torch.Tensor) -> torch.Tensor:
+        dist = torch.cdist(x, x, p=2)
+        return dist ** 2
+
+    def forward(self, results: dict) -> torch.Tensor:
+        x, z = self.get_inputs(results)
+        
+        # 1. Filter Indices (Exclude Quaternion & Veronese parts)
+        if self.exclude_x_idx:
+            full_dim = x.shape[-1]
+            keep_idx = [i for i in range(full_dim) if i not in self.exclude_x_idx]
+            x = x[..., keep_idx]
+
+        if self.exclude_z_idx:
+            full_dim = z.shape[-1]
+            keep_idx = [i for i in range(full_dim) if i not in self.exclude_z_idx]
+            z = z[..., keep_idx]
+
+        # 2. Flatten for Pairwise Distance
+        x_flat = x.reshape(-1, x.shape[-1])
+        z_flat = z.reshape(-1, z.shape[-1])
+        
+        # 3. Random Subsampling (Efficiency)
+        N = x_flat.size(0)
+        n_samples = min(N, self.sample_size)
+        
+        if n_samples > 0:
+            idx = torch.randperm(N, device=x.device)[:n_samples]
+            x_sub = x_flat[idx]
+            z_sub = z_flat[idx]
+        else:
+            x_sub = x_flat
+            z_sub = z_flat
+        
+        # 4. Compute Squared Distances
+        # Since x is filtered (no quaternions), we use Euclidean distance for both
+        dist_x_sq = self._compute_dist_sq(x_sub)
+        dist_z_sq = self._compute_dist_sq(z_sub)
+        
+        # 5. Apply Learnable Scale
+        current_scale = self.min_scale + F.softplus(self.scale_param)
+        
+        # 6. Loss Calculation (MSE between scaled distances)
+        loss = F.mse_loss(dist_x_sq, current_scale * dist_z_sq)
+        
+        return self.weight * self.apply_weight_decay(loss)

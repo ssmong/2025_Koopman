@@ -21,10 +21,8 @@ class BaseLoss(nn.Module):
 
         # Pre-compute decay weights
         if self.weight_decay != 1.0:
-            steps = torch.arange(n_step_max + 1)    # Add one for the initial state
+            steps = torch.arange(n_step_max + 1)
             weights = self.weight_decay ** steps
-            # register_buffer handles device movement automatically
-            # persistent=False prevents saving this to state_dict
             self.register_buffer('decay_weights', weights, persistent=False)
         else:
             self.register_buffer('decay_weights', None, persistent=False)
@@ -61,9 +59,6 @@ class BaseLoss(nn.Module):
         """
         pred, target = self.get_inputs(results)
         
-        # pred, target: [B, T, D]
-        # MSE per element: [B, T, D]
-        # In this codebase, T = N + 1, where N is the number of prediction steps.
         loss = self.loss_fn(pred, target)
         loss = loss.mean(dim=-1)    # Average over dimensions (D): [B, T]
         final_loss = self.apply_weight_decay(loss)

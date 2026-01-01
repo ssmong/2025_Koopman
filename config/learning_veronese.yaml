@@ -1,0 +1,14 @@
+_recursive_: False
+
+defaults:
+  - data: attitude
+  - model: lpv_veronese       
+  - loss: loss_veronese       
+  - train: train_default
+  - _self_
+
+wandb:
+  project: "2025-koopman"
+  entity: null
+  group: "veronese"
+  mode: "online"

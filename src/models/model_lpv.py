@@ -1,6 +1,7 @@
-from typing import Any, Dict
+from typing import Any, Dict, List
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from omegaconf import DictConfig
 import hydra
 
@@ -9,16 +10,19 @@ class LPVModel(nn.Module):
                  state_dim: int, 
                  control_dim: int,
                  latent_dim: int,
+                 quat_indices: List[int],
                  eigval_max: float,
                  context: DictConfig, 
                  lifting: DictConfig,
-                 matrix: DictConfig):
+                 matrix: DictConfig,
+                 decoding: DictConfig = None,):
         super().__init__()
         
         self.state_dim = state_dim
         self.control_dim = control_dim  
         self.latent_dim = latent_dim
         self.eigval_max = eigval_max
+        self.quat_indices = quat_indices
 
         assert latent_dim % 2 == 0, f"Latent dim must be even for block-diagonal LPV, got {latent_dim}"
 
@@ -27,8 +31,9 @@ class LPVModel(nn.Module):
             in_features=state_dim, 
             out_features=latent_dim
         )   
+        decoding = decoding if decoding is not None else lifting
         self.decoder = hydra.utils.instantiate(
-            lifting, 
+            decoding, 
             in_features=latent_dim, 
             out_features=state_dim
         )
@@ -69,9 +74,6 @@ class LPVModel(nn.Module):
         _init_layer(self._to_B, bias=noise)
     
     def _forward_dynamics(self, z, A_params, B_flat, u):
-        """
-        Instead of making A explicitly, calculate z_next
-        """
         batch_size = z.size(0)
         n_blocks = self.latent_dim // 2
 
@@ -125,6 +127,11 @@ class LPVModel(nn.Module):
         
         z_traj = torch.stack(z_traj, dim=1)     # [B, N+1, D]
         x_traj = self.decoder(z_traj)           # [B, N+1, D]
+
+        if not self.training and self.quat_indices is not None:
+            q_part = x_traj[..., self.quat_indices]
+            q_norm = F.normalize(q_part, p=2, dim=-1)
+            x_traj[..., self.quat_indices] = q_norm
         
         results = {
             "z_traj": z_traj,
@@ -197,4 +204,3 @@ class LPVModel(nn.Module):
         B = B_flat.view(batch_size, self.latent_dim, self.control_dim)
 
         return B
-        
