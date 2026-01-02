@@ -8,7 +8,8 @@ class VeroneseLifting(nn.Module):
                  in_features: int, 
                  out_features: int, 
                  quat_indices: List[int], 
-                 backbone: Dict):
+                 backbone: Dict,
+                 **kwargs):
         # out_features: Veronese Dim + NN Dim
         # backbone: Hydra config for backbone model (learnable Feature Map) (ResNetBlock)
         
@@ -32,27 +33,27 @@ class VeroneseLifting(nn.Module):
         )
         
         # Pre-compute indices for Veronese calculation
-        # Use python list for direct indexing (works on any device)
         triu_idx = torch.triu_indices(self.n_quat, self.n_quat)
-        self.idx_i = triu_idx[0].tolist()
-        self.idx_j = triu_idx[1].tolist()
+        self.register_buffer('idx_i', triu_idx[0], persistent=False)
+        self.register_buffer('idx_j', triu_idx[1], persistent=False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         q = x[..., self.quat_indices] # [..., 4]
         
-        z_veronese = q[..., self.idx_i] * q[..., self.idx_j]    # [..., 10] : [q1^2, q1q2, ..., q4^2]
+        z_veronese = q[..., self.idx_i] * q[..., self.idx_j]    # [..., 10] : [q0^2, q0q1, ..., q3^2]
         # Learnable Feature Map: Neural Network Lifting
         z_nn = self.backbone(x) # [..., nn_out_dim]
         
-        z = torch.cat([z_veronese, z_nn], dim=-1)    
+        z = torch.cat([z_veronese, z_nn.to(z_veronese.dtype)], dim=-1)    
         return z
 
 class VeroneseDecoding(nn.Module):
     def __init__(self, 
                  in_features: int, 
                  out_features: int, 
-                 quat_indices: List[int],
-                 backbone: Dict):
+                 quat_indices: List[int], 
+                 backbone: Dict,
+                 **kwargs):
         # out_features: State Dim
         # backbone: Hydra config for backbone model (learnable Feature Map) (ResNetBlock)
         
@@ -74,20 +75,21 @@ class VeroneseDecoding(nn.Module):
         row, col = triu_idx[0], triu_idx[1]
         
         # Indices for filling the upper triangle
-        self.triu_rows = row.tolist()
-        self.triu_cols = col.tolist()
+        self.register_buffer('triu_rows', row, persistent=False)
+        self.register_buffer('triu_cols', col, persistent=False)
         
         # Indices for filling the symmetric lower triangle (where row != col)
         mask = row != col
-        self.sym_rows = col[mask].tolist() # swapped
-        self.sym_cols = row[mask].tolist() # swapped
-        self.sym_z_idx = torch.nonzero(mask).squeeze().tolist() # indices in z_veronese
+        self.register_buffer('sym_rows', col[mask], persistent=False)
+        self.register_buffer('sym_cols', row[mask], persistent=False)
+        self.register_buffer('sym_z_idx', torch.nonzero(mask).squeeze(), persistent=False)
         
         # Pre-compute non-quat indices for direct assignment
         all_indices = set(range(out_features))
         quat_set = set(quat_indices)
-        self.non_quat_indices = list(all_indices - quat_set)
-        self.non_quat_indices.sort()
+        non_quat_indices = list(all_indices - quat_set)
+        non_quat_indices.sort()
+        self.register_buffer('non_quat_indices', torch.tensor(non_quat_indices), persistent=False)
 
     def _recover_quat(self, z_veronese: torch.Tensor) -> torch.Tensor:
         """
@@ -102,10 +104,19 @@ class VeroneseDecoding(nn.Module):
         # Fill symmetric lower triangle
         M[:, self.sym_rows, self.sym_cols] = z_veronese[:, self.sym_z_idx]
         
-        _, eigenvectors = torch.linalg.eigh(M) # [B, 4], [B, 4, 4]
+        # Eigen decomposition needs float32 for stability and support
+        # Use float32 for eigh calculation
+        M_f32 = M.float()
+        _, eigenvectors = torch.linalg.eigh(M_f32) # [B, 4], [B, 4, 4]
         q_recon = eigenvectors[:, :, -1]       # [B, 4]
         
-        sign = torch.sign(q_recon[:, 0:1] + 1e-9)
+        # Restore original dtype
+        q_recon = q_recon.to(z_veronese.dtype)
+        
+        # Enforce q[0] > 0 for uniqueness (handle double cover)
+        # Detach sign to ensure gradients don't flow through the discrete flip
+        sign = torch.sign(q_recon[:, 0:1]).detach()
+        sign[sign == 0] = 1.0
         q_recon = q_recon * sign
         
         return q_recon
@@ -122,6 +133,10 @@ class VeroneseDecoding(nn.Module):
         # Reconstruct full state x
         # n_quat + nn_out_dim = out_features
         x_recon = torch.zeros(z.size(0), self.n_quat + self.nn_out_dim, device=z.device, dtype=z.dtype)
+        
+        # Cast predictions to match x_recon dtype
+        q_pred = q_pred.to(x_recon.dtype)
+        others_pred = others_pred.to(x_recon.dtype)
         
         x_recon[:, self.quat_indices] = q_pred
         x_recon[:, self.non_quat_indices] = others_pred

@@ -2,7 +2,7 @@ _recursive_: False
 
 defaults:
   - data: attitude
-  - model: lpv_veronese       
+  - model: model_lpv_veronese       
   - loss: loss_veronese       
   - train: train_default
   - _self_

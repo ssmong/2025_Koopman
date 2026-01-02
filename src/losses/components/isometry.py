@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from src.losses.components.quat import QuatLoss
+from src.losses.components.quat import BaseLoss, QuatLoss
 
 class IsometryLoss(QuatLoss):
     # Loss calculation: || D_x^2 - s * D_z^2 ||^2
@@ -105,7 +105,7 @@ class PartialIsometryLoss(BaseLoss):
         return dist ** 2
 
     def forward(self, results: dict) -> torch.Tensor:
-        x, z = self.get_inputs(results)
+        z, x = self.get_inputs(results)
         
         # 1. Filter Indices (Exclude Quaternion & Veronese parts)
         if self.exclude_x_idx:
@@ -117,7 +117,7 @@ class PartialIsometryLoss(BaseLoss):
             full_dim = z.shape[-1]
             keep_idx = [i for i in range(full_dim) if i not in self.exclude_z_idx]
             z = z[..., keep_idx]
-
+    
         # 2. Flatten for Pairwise Distance
         x_flat = x.reshape(-1, x.shape[-1])
         z_flat = z.reshape(-1, z.shape[-1])
@@ -144,5 +144,5 @@ class PartialIsometryLoss(BaseLoss):
         
         # 6. Loss Calculation (MSE between scaled distances)
         loss = F.mse_loss(dist_x_sq, current_scale * dist_z_sq)
-        
-        return self.weight * self.apply_weight_decay(loss)
+
+        return self.weight * loss

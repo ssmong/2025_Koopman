@@ -5,7 +5,7 @@ from src.losses.components.base import BaseLoss
 class QuatLoss(BaseLoss):
     def __init__(self, 
                  quat_indices: Optional[List[int]] = None,
-                 quat_loss_type: str = 'mse',
+                 quat_loss_type: str = 'geodesic',
                  quat_norm_weight: float = 0.0,
                  **kwargs):
         super().__init__(**kwargs)
@@ -21,14 +21,14 @@ class QuatLoss(BaseLoss):
         q_target_unit = q_target / q_target_norm
 
         if self.quat_loss_type == 'geodesic':
-            # 1 - <q1, q2>^2 (Geodesic distance approximation)
+            # 1 - <q_a, q_b>^2 (Geodesic distance approximation)
             # Handles double cover automatically because of the square
             dot = (q_pred_unit * q_target_unit).sum(dim=-1)
             quat_loss = 1.0 - dot ** 2
             
         elif self.quat_loss_type == 'chordal':
-            # Euclidean distance handling double cover: min(|q1-q2|^2, |q1+q2|^2)
-            # Equivalent to 2 * (1 - |<q1, q2>|) for unit quaternions
+            # Euclidean distance handling double cover: min(|q_a-q_b|^2, |q_a+q_b|^2)
+            # Equivalent to 2 * (1 - |<q_a, q_b>|) for unit quaternions
             diff_plus = (q_pred_unit - q_target_unit).norm(dim=-1)
             diff_minus = (q_pred_unit + q_target_unit).norm(dim=-1)
             quat_loss = torch.min(diff_plus, diff_minus).square() # Use squared distance

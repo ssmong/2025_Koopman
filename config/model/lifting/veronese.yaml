@@ -1,0 +1,16 @@
+_target_: src.models.components.block_veronese.VeroneseLifting
+_recursive_: False
+
+quat_indices: ${..quat_indices}
+
+# Expose params for consistency with other lifting modules
+hidden_size: 256
+num_layers: 3
+
+backbone:
+  _target_: src.models.components.block_resnet.ResNetBlock
+  hidden_size: ${..hidden_size}
+  num_layers: ${..num_layers}
+  use_norm: true
+  activation: 
+    _target_: torch.nn.SiLU

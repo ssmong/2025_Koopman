@@ -3,11 +3,11 @@ import torch
 import numpy as np
 import os
 
-def _compute_angle_error(q1, q2):
-    q1 = q1 / (q1.norm(dim=-1, keepdim=True) + 1e-8)
-    q2 = q2 / (q2.norm(dim=-1, keepdim=True) + 1e-8)
+def _compute_angle_error(q_a, q_b):
+    q_a = q_a / (q_a.norm(dim=-1, keepdim=True) + 1e-8)
+    q_b = q_b / (q_b.norm(dim=-1, keepdim=True) + 1e-8)
     
-    dot = (q1 * q2).sum(dim=-1).abs()
+    dot = (q_a * q_b).sum(dim=-1).abs()
     dot = torch.clamp(dot, -1.0, 1.0)
     return 2 * torch.acos(dot)
 
@@ -58,7 +58,7 @@ def plot_trajectory(
             err = torch.rad2deg(_compute_angle_error(q_pred, q_gt))
             plots.append((f"State {raw_idx} (Quat Error)", err, None, "Degree"))
 
-            labels = ['x', 'y', 'z', 'w']
+            labels = ['0', '1', '2', '3']
             for i in range(4):
                 val_p = q_pred[:, i]
                 val_g = q_gt[:, i]
