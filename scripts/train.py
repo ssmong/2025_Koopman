@@ -342,7 +342,12 @@ def main(cfg: DictConfig):
     else:
         log.warning(f"Best model not found at {best_model_path}. Using current model weights.")
 
-    test_dataset = hydra.utils.instantiate(cfg.data, split="test", train_steps=test_steps)
+    test_dataset = hydra.utils.instantiate(
+        cfg.data, 
+        split="test", 
+        train_steps=test_steps,
+        stats_dir=stats_dir
+    )
     test_loader = DataLoader(
         test_dataset, 
         batch_size=cfg.train.batch_size, 

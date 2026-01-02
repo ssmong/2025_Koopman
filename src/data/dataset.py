@@ -98,7 +98,12 @@ class KoopmanDataProcessor:
             stats_path = Path(stats_path)
         
         if not stats_path.exists():
-            raise FileNotFoundError(f"Stats file missing: {stats_path}")
+            # If stats file is missing, we cannot proceed with correct normalization for Val/Test splits.
+            # This prevents silent failures where random/default stats might be used.
+            raise FileNotFoundError(
+                f"Stats file missing at {stats_path}. "
+                f"Ensure training has completed or stats_dir is correctly pointed to."
+            )
 
         log.info(f"Loading stats from {stats_path}")
         with open(stats_path, 'r') as f:
