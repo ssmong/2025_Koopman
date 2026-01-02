@@ -130,8 +130,15 @@ def main(cfg: DictConfig):
     criterion.bind_model(model)
     criterion.to(device)
     
-    combined_params = list(model.parameters()) + list(criterion.parameters())
-    optimizer = hydra.utils.instantiate(cfg.train.optimizer, params=combined_params)
+    # Remove duplicates from combined_params
+    param_set = set()
+    unique_params = []
+    for p in list(model.parameters()) + list(criterion.parameters()):
+        if p not in param_set:
+            param_set.add(p)
+            unique_params.append(p)
+            
+    optimizer = hydra.utils.instantiate(cfg.train.optimizer, params=unique_params)
 
     # Build scheduler
     scheduler_cfg = OmegaConf.to_container(cfg.train.scheduler, resolve=True)
