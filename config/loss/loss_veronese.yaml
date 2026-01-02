@@ -64,7 +64,7 @@ targets:
     key_target: z_traj_gt # Dummy, not used
 
   isometric:
-    _target_: src.losses.components.isometry.PartialIsometryLoss
+    _target_: src.losses.components.isometry.IsometryLoss
     n_step_max: ${...n_step_max}
     weight_decay: ${...decay}
     weight: ${...weights.isometric}
@@ -75,5 +75,6 @@ targets:
     min_scale: 1.0
     sample_size: 512
     
-    exclude_x_idx: ${data.quat_indices} 
+    quat_indices: ${data.quat_indices}
+    quat_norm_weight: 0.0
     exclude_z_idx: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
