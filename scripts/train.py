@@ -210,8 +210,8 @@ def main(cfg: DictConfig):
 
             loss_val = loss.item()
             
-            if not torch.isfinite(loss):
-                log.warning(f"Batch {batch_idx}: Loss is {loss_val} (NaN/Inf). Skipping batch.")
+            if not torch.isfinite(loss) or loss_val > 1e5:
+                log.warning(f"Batch {batch_idx}: Loss is {loss_val} (NaN/Inf/Too Large). Skipping batch.")
                 optimizer.zero_grad()
                 continue
 
