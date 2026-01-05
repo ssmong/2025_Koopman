@@ -210,6 +210,7 @@ class KoopmanMPC:
                  R_diag: list,
                  F_diag: list,
                  rest_ratio: float = 1,
+                 constraint_cfg: dict = None,
                  device: str = "cuda"):
         
         self.model = model
@@ -218,6 +219,7 @@ class KoopmanMPC:
         self.device = device
         self.latent_dim = model.latent_dim
         self.control_dim = model.control_dim
+        self.constraint_cfg = constraint_cfg
         
         u_min_phys = np.full(self.control_dim, u_min)
         u_max_phys = np.full(self.control_dim, u_max)
@@ -262,6 +264,42 @@ class KoopmanMPC:
              F_expanded[self.F_np.shape[0]:] = np.mean(self.F_np) * rest_ratio
              self.F_np = F_expanded
              
+        # --- Prepare AFZ Constraints ---
+        A_constr = None
+        if self.constraint_cfg is not None:
+            try:
+                if hasattr(self.model, 'mixing'):
+                    with torch.no_grad():
+                        W = self.model.mixing.get_matrix()
+                        # Ensure W is float32 for inverse if it's float16
+                        if W.dtype == torch.float16:
+                            W = W.float()
+                        W_inv = torch.linalg.inv(W)
+                        W_inv_np = W_inv.cpu().numpy()
+                else:
+                    log.warning("No mixing layer found in model for AFZ constraints. Assuming Identity.")
+                    W_inv_np = np.eye(self.latent_dim)
+                
+                boresight_vec = np.array(self.constraint_cfg['boresight_vec'])
+                afz_list = self.constraint_cfg.get('afz_list', [])
+                
+                M_list = []
+                for item in afz_list:
+                    theta = np.deg2rad(item['theta'])
+                    afz_vec = np.array(item['afz_vec'])
+                    M_prime = self._get_afz_matrix(theta, afz_vec, boresight_vec)
+                    M_list.append(M_prime)
+                
+                if M_list:
+                    M_total = np.vstack(M_list) # Shape: (N_zones, 10)
+                    # We only care about the first 10 dimensions of the unmixed state (Veronese part)
+                    W_inv_trunc = W_inv_np[:10, :] # Shape: (10, latent_dim)
+                    A_constr = M_total @ W_inv_trunc # Shape: (N_zones, latent_dim)
+                    log.info(f"Initialized AFZ constraints with {len(M_list)} zones.")
+            except Exception as e:
+                 log.error(f"Failed to initialize AFZ constraints: {e}")
+                 traceback.print_exc()
+
         state_err = self.z[:-1] - self.z_ref[:-1]
         cost += cp.sum(cp.multiply(self.Q_np, cp.square(state_err)))
         cost += cp.sum(cp.multiply(self.R_np, cp.square(self.u)))
@@ -274,6 +312,10 @@ class KoopmanMPC:
             # Apply element-wise normalized constraints
             constraints.append(self.u[k] >= self.u_min_norm)
             constraints.append(self.u[k] <= self.u_max_norm)
+            
+            # Apply AFZ constraints
+            if A_constr is not None:
+                constraints.append(A_constr @ self.z[k+1] <= 2)
             
         self.prob = cp.Problem(cp.Minimize(cost), constraints)
 
@@ -413,7 +455,6 @@ class KoopmanMPC:
         M[1:, 1:] = m_vv
 
         # Map to Veronese M' (1x10)
-        # Order: q0^2, q0q1, q0q2, q0q3, q1^2, q1q2, q1q3, q2^2, q2q3, q3^2
         # Off-diagonals are multiplied by 2
         M_prime = np.array([
             M[0,0],                         # q0^2

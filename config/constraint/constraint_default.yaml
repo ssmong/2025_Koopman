@@ -1,0 +1,10 @@
+defaults:
+  - afz
+  - _self_
+
+u_min: -1.0
+u_max: 1.0
+
+constraint_cfg:
+  boresight_vec: [1, 0, 0]  # Single body vector (y)
+

@@ -400,6 +400,22 @@ def run(cfg: DictConfig):
         
         mpc_params = dict(cfg.controller.mpc_params)
         
+        # Merge constraint config into mpc_params
+        if "constraint" in cfg:
+            constraint_cfg = OmegaConf.to_container(cfg.constraint, resolve=True)
+            
+            # Map flat config to nested structure expected by controller
+            mpc_params['u_min'] = constraint_cfg.get('u_min', -1.0)
+            mpc_params['u_max'] = constraint_cfg.get('u_max', 1.0)
+            
+            if 'constraint_cfg' in constraint_cfg:
+                # constraint_cfg is already a dict with boresight_vec
+                ctrl_constr = constraint_cfg['constraint_cfg']
+                # Add afz_list from the constraint root or included config
+                if 'afz_list' in constraint_cfg:
+                    ctrl_constr['afz_list'] = constraint_cfg['afz_list']
+                mpc_params['constraint_cfg'] = ctrl_constr
+
         # NOTE: Run this task at 0.1s (history update rate).
         # Internal logic handles 1s control update.
         hist_dt = 0.1 # This should match history dt in training data
@@ -497,17 +513,36 @@ def run(cfg: DictConfig):
             )
         viz.settings.showRWLabels = 0  
         viz.settings.viewRWHUD = 1
+        viz.settings.showSpacecraftCS = 1 # Show Body Frame Axes
         
-        vizSupport.createConeInOut(viz, toBodyName='sun', coneColor = 'r',
-                           normalVector_B=[1, 0, 0], incidenceAngle=starTrackerFov*macros.D2R, isKeepIn=False,
-                           coneHeight=5.0, coneName='sunKeepOut')
-        if use2StarTracker:
-            vizSupport.createConeInOut(viz, toBodyName='sun', coneColor = 'm',
-                               normalVector_B=[0, 0, 1], incidenceAngle=starTrackerFov*macros.D2R, isKeepIn=True,
-                               coneHeight=5.0, coneName='sunKeepOut')
-        vizSupport.createConeInOut(viz, toBodyName='sun', coneColor = 'b',
-                           normalVector_B=[0, 1, 0], incidenceAngle=sunSensorFov*macros.D2R, isKeepIn=True,
-                           coneHeight=5.0, coneName='sunKeepIn')
+        # --- Configured Cone Visualization ---
+        constraint_cfg = None
+        if "constraint" in cfg:
+            constraint_cfg = OmegaConf.to_container(cfg.constraint, resolve=True)
+            
+        if constraint_cfg and 'boresight_vec' in constraint_cfg:
+            boresight_vec = constraint_cfg['boresight_vec']
+            
+            if 'afz_list' in constraint_cfg:
+                colors = ['r', 'm', 'c', 'y', 'g'] # Red, Magenta, Cyan, Yellow, Green
+                
+                afz_data = constraint_cfg['afz_list']
+                
+                if isinstance(afz_data, list):
+                    for idx, afz in enumerate(afz_data):
+                        theta_rad = afz['theta'] * macros.D2R
+                        
+                        # Cycle through colors
+                        color = colors[idx % len(colors)]
+                        
+                        vizSupport.createConeInOut(viz, toBodyName='earth', coneColor=color,
+                                           normalVector_B=boresight_vec, incidenceAngle=theta_rad, isKeepIn=False,
+                                           coneHeight=5.0, coneName=f'afz_{idx}')
+                else:
+                    bsk_logger.bskLog(bskLogging.BSK_ERROR, f"afz_list must be a list, but got {type(afz_data)}")
+                    raise ValueError(f"afz_list configuration error: expected list, got {type(afz_data)}")
+        else:
+             bsk_logger.bskLog(bskLogging.BSK_WARNING, "No constraint configuration found. Skipping cone visualization.")
 
     # -------------------------------------------------------------------------
     # 11. Execution

@@ -1,0 +1,9 @@
+# Attitude Forbidden Zones (AFZ)
+- afz_vec: [-0.9245, 0.0925, 0.3698]
+  theta: 18.0          
+- afz_vec: [0.4602, -0.2761, 0.8438]
+  theta: 20.0
+- afz_vec: [-0.7071, -0.7071, 0.0]
+  theta: 20.0
+- afz_vec: [-0.7071, 0.7071, 0.0]
+  theta: 18.0

@@ -9,6 +9,3 @@ mpc_params:
   R_diag: [0.01, 0.01, 0.01]
   F_diag: [200.0]
   rest_ratio: 1.0
-  u_min: -1.0
-  u_max: 1.0
-  
