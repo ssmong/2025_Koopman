@@ -7,11 +7,13 @@ class QuatLoss(BaseLoss):
                  quat_indices: Optional[List[int]] = None,
                  quat_loss_type: str = 'geodesic',
                  quat_norm_weight: float = 0.0,
+                 quat_weight: float = 1.0,
                  **kwargs):
         super().__init__(**kwargs)
         self.quat_indices = quat_indices
         self.quat_loss_type = quat_loss_type
         self.quat_norm_weight = quat_norm_weight
+        self.quat_weight = quat_weight
 
     def _compute_quat_loss(self, q_pred: torch.Tensor, q_target: torch.Tensor) -> torch.Tensor:
         q_pred_norm = q_pred.norm(dim=-1, keepdim=True) + 1e-8
@@ -70,7 +72,8 @@ class QuatLoss(BaseLoss):
                 loss_nq_sum = nq_errors.sum(dim=-1)
 
             # 5. Combine final loss
-            loss = (loss_q + loss_nq_sum) / D
+            # Apply additional weight to quaternion part
+            loss = (self.quat_weight * loss_q + loss_nq_sum) / D
 
         loss = self.weight * self.apply_weight_decay(loss)
         return loss

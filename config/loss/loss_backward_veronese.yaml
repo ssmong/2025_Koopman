@@ -4,17 +4,18 @@ n_step_max: ${max:${train.train_steps}, ${train.val_steps}, ${train.test_steps}}
 decay: 0.99
 quat_weight: 1.0
 
-weights:
+weights: 
   pred_x: 1.0
   pred_z: 1.0
   recon_z: 0.1
+  veronese_trace: 0.01 
   isometric: 0.01
   backward_step: 0.01
   backward_roll: 0.01
 
 targets:
-  # 1. Prediction Loss: || x_gt - D(z_pred) ||^2
-  # t = k ~ k+N, Naturally include reconstruction loss for initial state
+  # 1. Prediction Loss: || x_gt - x_pred ||^2
+  # t = k ~ k+N
   pred_x:
     _target_: src.losses.components.quat.QuatLoss
 
@@ -22,24 +23,25 @@ targets:
     weight_decay: ${...decay}
 
     weight: ${...weights.pred_x}
-    key_pred: x_traj          # [B, N+1, D]
-    key_target: x_traj_gt     # [B, N+1, D]
+    key_pred: x_traj
+    key_target: x_traj_gt
+    # Analytic Decoder always outputs unit quaternions, so no norm loss is needed
+    quat_norm_weight: 0.0 
     quat_indices: ${data.quat_indices}
-    quat_loss_type: geodesic # Options: geodesic, chordal
-    quat_norm_weight: 0.1
+    quat_loss_type: geodesic
     quat_weight: ${...quat_weight}
 
-  # 2. Latent Prediction Loss: || E(x_gt) - z_pred ||^2
+  # 2. Latent Prediction Loss: || z_gt - z_pred ||^2
   # t = k ~ k+N
   pred_z:
     _target_: src.losses.components.base.BaseLoss
 
     n_step_max: ${...n_step_max}
     weight_decay: ${...decay}
-    
+
     weight: ${...weights.pred_z}
-    key_pred: z_traj          # [B, N+1, D]
-    key_target: z_traj_gt     # [B, N+1, D]
+    key_pred: z_traj
+    key_target: z_traj_gt
 
   # 3. Latent Consistency Loss: || z_pred - E(D(z_pred)) ||^2
   # t = k ~ k+N
@@ -50,28 +52,36 @@ targets:
     weight_decay: ${...decay}
 
     weight: ${...weights.recon_z}
-    key_pred: z_traj_re       
-    key_target: z_traj        
+    key_pred: z_traj_re
+    key_target: z_traj
 
-  # 4. Isometry Loss: || D_x^2 - s * D_z^2 ||^2
-  # Random subsampling
-  isometric:
-    _target_: src.losses.components.isometry.IsometryLoss
+  # 4. Veronese Trace Constraint (z space)
+  # Constraint on the sum of q_i^2 on the latent space
+  veronese_trace:
+    _target_: src.losses.components.veronese.VeroneseTraceLoss
 
     n_step_max: ${...n_step_max}
     weight_decay: ${...decay}
 
+    weight: ${...weights.veronese_trace}
+    key_pred: z_traj
+    key_target: z_traj_gt # Dummy, not used
+
+  isometric:
+    _target_: src.losses.components.isometry.IsometryLoss
+    n_step_max: ${...n_step_max}
+    weight_decay: ${...decay}
     weight: ${...weights.isometric}
-
-    key_pred: z_traj_gt
-    key_target: x_traj_gt
-
-    quat_indices: ${data.quat_indices}
-    quat_loss_type: geodesic
-    quat_norm_weight: 0.0
-
+    
+    key_pred: z_traj_gt   # Latent Z (NN output included)
+    key_target: x_traj_gt # Ground Truth X
+    
     min_scale: 1.0
     sample_size: 512
+    
+    quat_indices: ${data.quat_indices}
+    quat_norm_weight: 0.0
+    exclude_z_idx: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 
   # 5. Backward Step-wise Prediction Loss
   # z_t = A^-1(z_{t+1} - B u_t) for all t

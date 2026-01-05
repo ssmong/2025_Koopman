@@ -2,6 +2,7 @@ _target_: src.losses.objective.Objective
 
 n_step_max: ${max:${train.train_steps}, ${train.val_steps}, ${train.test_steps}}
 decay: 0.99
+quat_weight: 1.0
 
 weights:
   pred_x: 1.0
@@ -24,6 +25,7 @@ targets:
     quat_indices: ${data.quat_indices}
     quat_loss_type: geodesic # Options: geodesic, chordal
     quat_norm_weight: 0.1
+    quat_weight: ${...quat_weight}
 
   # 2. Latent Prediction Loss: || E(x_gt) - z_pred ||^2
   # t = k ~ k+N

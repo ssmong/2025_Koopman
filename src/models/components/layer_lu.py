@@ -32,5 +32,16 @@ class LULayer(nn.Module):
 
     def inverse(self, z):
         W = self.get_matrix()
+        
+        # Convert to float32 for inverse calculation
+        # torch.linalg.inv does not support float16 (Half)
+        orig_dtype = W.dtype
+        if orig_dtype == torch.float16:
+            W = W.float()
+            
         W_inv = torch.linalg.inv(W)
+        
+        if orig_dtype == torch.float16:
+            W_inv = W_inv.to(orig_dtype)
+            
         return F.linear(z, W_inv)

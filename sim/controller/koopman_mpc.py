@@ -162,10 +162,6 @@ class BskKoopmanMPC(sysModel.SysModel):
              self.last_ctrl_update_time = current_time_sec
         else:
              # Not time yet: Hold previous control
-             # Basilisk modules run at task rate. If we don't write new message, it might hold old value depending on reader?
-             # But CmdTorqueBodyMsg is usually read every step by dynamics.
-             # We should write the SAME torque as before to be safe/explicit, or rely on zero-order hold behavior of effector.
-             # Let's write previous u.
              out_payload = messaging.CmdTorqueBodyMsgPayload()
              out_payload.torqueRequestBody = self.prev_u.tolist()
              self.cmdTorqueOutMsg.write(out_payload, CurrentSimNanos, self.moduleID)
@@ -390,3 +386,43 @@ class KoopmanMPC:
         self.prev_u_seq = self.u.value
 
         return self.u.value[0]
+
+    def _get_afz_matrix(self, theta: float, x: np.ndarray, y: np.ndarray) -> np.ndarray:
+        """
+        :param theta: Forbidden zone angle [radians]
+        :param x: Forbidden zone vector in the inertial frame (3x1)
+        :param y: Boresight vector in the body frame (3x1)
+        :return: M_prime (1x10 matrix): Attitude forbidden constraint: M' @ veronese(q) <= 2
+        """
+        x = np.array(x, dtype=float).flatten()  
+        y = np.array(y, dtype=float).flatten()  
+
+        # Basic terms
+        dot_xy = np.dot(x, y)
+        cross_xy = np.cross(x, y)
+        alpha = 2 - np.cos(theta)
+
+        m_ss = dot_xy + alpha
+        m_vs = -cross_xy 
+        m_vv = np.outer(x, y) + np.outer(y, x) - (dot_xy - alpha) * np.eye(3)
+
+        M = np.zeros((4, 4))
+        M[0, 0] = m_ss
+        M[0, 1:] = m_vs
+        M[1:, 0] = m_vs
+        M[1:, 1:] = m_vv
+
+        # Map to Veronese M' (1x10)
+        # Order: q0^2, q0q1, q0q2, q0q3, q1^2, q1q2, q1q3, q2^2, q2q3, q3^2
+        # Off-diagonals are multiplied by 2
+        M_prime = np.array([
+            M[0,0],                         # q0^2
+            2*M[0,1], 2*M[0,2], 2*M[0,3],   # q0q1, q0q2, q0q3
+            M[1,1],                         # q1^2
+            2*M[1,2], 2*M[1,3],             # q1q2, q1q3
+            M[2,2],                         # q2^2
+            2*M[2,3],                       # q2q3
+            M[3,3]                          # q3^2
+        ])
+
+        return M_prime.reshape(1, -1)
