@@ -3,6 +3,8 @@ import torch.nn as nn
 import hydra
 from typing import List, Dict
 
+from src.models.components.layer_lu import LULayer
+
 class VeroneseLifting(nn.Module):
     def __init__(self, 
                  in_features: int, 
@@ -31,6 +33,8 @@ class VeroneseLifting(nn.Module):
             in_features=in_features,
             out_features=self.nn_out_dim
         )
+
+        self.mixing = LULayer(out_features, out_features)
         
         # Pre-compute indices for Veronese calculation
         triu_idx = torch.triu_indices(self.n_quat, self.n_quat)
@@ -45,6 +49,7 @@ class VeroneseLifting(nn.Module):
         z_nn = self.backbone(x) # [..., nn_out_dim]
         
         z = torch.cat([z_veronese, z_nn.to(z_veronese.dtype)], dim=-1)    
+        z = self.mixing(z)
         return z
 
 class VeroneseDecoding(nn.Module):
@@ -70,6 +75,8 @@ class VeroneseDecoding(nn.Module):
             in_features=in_features, 
             out_features=self.nn_out_dim
         )
+
+        self.enc_mixing = None
         
         triu_idx = torch.triu_indices(self.n_quat, self.n_quat)
         row, col = triu_idx[0], triu_idx[1]
@@ -90,6 +97,9 @@ class VeroneseDecoding(nn.Module):
         non_quat_indices = list(all_indices - quat_set)
         non_quat_indices.sort()
         self.register_buffer('non_quat_indices', torch.tensor(non_quat_indices), persistent=False)
+
+    def set_mixing(self, mixing: nn.Linear):
+        self.enc_mixing = mixing
 
     def _recover_quat(self, z_veronese: torch.Tensor) -> torch.Tensor:
         """
@@ -124,11 +134,13 @@ class VeroneseDecoding(nn.Module):
     def forward(self, z: torch.Tensor) -> torch.Tensor:
         original_shape = z.shape
         z = z.view(-1, original_shape[-1])
+
+        z_unmixed = self.enc_mixing.inverse(z)
         
-        z_v = z[:, :self.veronese_dim]
+        z_v = z_unmixed[:, :self.veronese_dim]
         q_pred = self._recover_quat(z_v)
         
-        others_pred = self.backbone(z)
+        others_pred = self.backbone(z_unmixed)
         
         # Reconstruct full state x
         # n_quat + nn_out_dim = out_features

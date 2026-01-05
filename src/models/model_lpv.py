@@ -22,7 +22,7 @@ class LPVModel(nn.Module):
         self.control_dim = control_dim  
         self.latent_dim = latent_dim
         self.eigval_max = eigval_max
-        self.quat_indices = quat_indices
+        self.quat_indices = list(quat_indices) if quat_indices is not None else None
 
         assert latent_dim % 2 == 0, f"Latent dim must be even for block-diagonal LPV, got {latent_dim}"
 
@@ -37,6 +37,9 @@ class LPVModel(nn.Module):
             in_features=latent_dim, 
             out_features=state_dim
         )
+
+        if hasattr(self.decoder, 'set_mixing'):
+            self.decoder.set_mixing(self.encoder.mixing)
 
         self.ctxt_encoder = hydra.utils.instantiate(context)
         self._to_A = hydra.utils.instantiate(
@@ -129,9 +132,10 @@ class LPVModel(nn.Module):
         x_traj = self.decoder(z_traj)           # [B, N+1, D]
 
         if not self.training and self.quat_indices is not None:
+            x_traj = x_traj.clone()
             q_part = x_traj[..., self.quat_indices]
             q_norm = F.normalize(q_part, p=2, dim=-1)
-            x_traj[..., self.quat_indices] = q_norm
+            x_traj[..., self.quat_indices] = q_norm.to(dtype=x_traj.dtype)
         
         results = {
             "z_traj": z_traj,
