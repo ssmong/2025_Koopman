@@ -268,7 +268,7 @@ class KoopmanMPC:
         A_constr = None
         if self.constraint_cfg is not None:
             try:
-                if hasattr(self.model, 'mixing'):
+                if hasattr(self.model.encoder, 'mixing'):
                     with torch.no_grad():
                         W = self.model.mixing.get_matrix()
                         # Ensure W is float32 for inverse if it's float16

@@ -1,6 +1,6 @@
 _target_: src.data.dataset.KoopmanDataset
 
-name: sloshing
+name: mpbm
 data_root: data/raw
 raw_state_dim: 7
 state_dim: 7
