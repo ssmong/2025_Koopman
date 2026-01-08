@@ -3,6 +3,8 @@ _target_: src.losses.objective.Objective
 n_step_max: ${max:${train.train_steps}, ${train.val_steps}, ${train.test_steps}}
 decay: 0.99 
 quat_weight: 1.0
+quat_loss_type: geodesic # Options: geodesic, chordal
+quat_norm_weight: 0.1
 
 weights: 
   pred_x: 1.0
@@ -26,7 +28,7 @@ targets:
     # Analytic Decoder always outputs unit quaternions, so no norm loss is needed
     quat_norm_weight: 0.0 
     quat_indices: ${data.quat_indices}
-    quat_loss_type: geodesic
+    quat_loss_type: ${...quat_loss_type}
     quat_weight: ${...quat_weight}
 
   # 2. Latent Prediction Loss: || z_gt - z_pred ||^2
@@ -78,6 +80,6 @@ targets:
     sample_size: 512
     
     quat_indices: ${data.quat_indices}
-    quat_weight: ${...quat_weight}
-    quat_norm_weight: 0.0
+    quat_norm_weight: ${...quat_norm_weight}
+    quat_loss_type: ${...quat_loss_type}
     exclude_z_idx: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
