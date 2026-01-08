@@ -9,8 +9,8 @@ weights:
   pred_z: 1.0
   recon_z: 0.1
   isometric: 0.01
-  backward_step: 0.01
-  backward_roll: 0.01
+  backward_roll_z: 0.01
+  backward_roll_x: 0.01
 
 targets:
   # 1. Prediction Loss: || x_gt - D(z_pred) ||^2
@@ -73,23 +73,7 @@ targets:
     min_scale: 1.0
     sample_size: 512
 
-  # 5. Backward Step-wise Prediction Loss
-  # z_t = A^-1(z_{t+1} - B u_t) for all t
-  backward_step:
-    _target_: src.losses.components.backward.BackwardStepLoss
-
-    n_step_max: ${...n_step_max}
-    weight_decay: ${...decay}
-
-    weight: ${...weights.backward_step}
-
-    key_z: z_traj_gt
-    key_A_params: A_params
-    key_B: B
-    key_u: u_future
-    eigval_max: ${model.eigval_max}
-
-  # 6. Backward Rolling Prediction Loss
+  # 5. Backward Rolling Prediction Loss (Z-space & X-space Combined)
   # Start from z_{t+N}, roll back to z_t
   backward_roll:
     _target_: src.losses.components.backward.BackwardRollingLoss
@@ -97,10 +81,15 @@ targets:
     n_step_max: ${...n_step_max}
     weight_decay: 1.0 # Not used for rolling loss
 
-    weight: ${...weights.backward_roll}
+    weight: 1.0 # Base weight is 1.0, individual weights are controlled below
 
     key_z: z_traj_gt
+    key_x: x_traj_gt
     key_A_params: A_params
     key_B: B
     key_u: u_future
     eigval_max: ${model.eigval_max}
+    
+    # Combined weights
+    weight_z: ${...weights.backward_roll_z}
+    weight_x: ${...weights.backward_roll_x}

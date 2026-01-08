@@ -11,6 +11,11 @@ class Objective(nn.Module):
 
     def bind_model(self, model: nn.Module):
         self.encoder = model.encoder
+        
+        # Propagate bind_model to child loss components if they have it
+        for _, criterion in self.targets.items():
+            if hasattr(criterion, 'bind_model'):
+                criterion.bind_model(model)
 
     def forward(self, results: dict):
         if self.encoder is None:

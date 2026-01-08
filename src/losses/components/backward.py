@@ -5,19 +5,29 @@ from src.losses.components.base import BaseLoss
 class BackwardLossBase(BaseLoss):
     def __init__(self,
                  key_z: str = "z_traj_gt",
+                 key_x: str = "x_traj_gt",
                  key_A_params: str = "A_params",
                  key_B: str = "B",
                  key_u: str = "u_future",
                  eigval_max: float = 1.0,
+                 weight_z: float = 1.0,
+                 weight_x: float = 0.0,
                  **kwargs):
         # Pass dummy keys to BaseLoss
         super().__init__(key_pred=key_z, key_target=key_z, **kwargs)
         
         self.key_z = key_z
+        self.key_x = key_x
         self.key_A_params = key_A_params
         self.key_B = key_B
         self.key_u = key_u
         self.eigval_max = eigval_max
+        self.weight_z = weight_z
+        self.weight_x = weight_x
+        self.decoder = None
+
+    def bind_model(self, model: nn.Module):
+        self.decoder = model.decoder
 
     def _analytic_backward_step(self, z_next: torch.Tensor, u: torch.Tensor, 
                               r: torch.Tensor, c: torch.Tensor, s: torch.Tensor, 
@@ -59,6 +69,9 @@ class BackwardLossBase(BaseLoss):
 
     def _get_params(self, results):
         z = results.get(self.key_z)             # [B, N+1, D]
+        # x is required only if weight_x > 0
+        x = results.get(self.key_x) if self.weight_x > 0 else None
+        
         A_params = results.get(self.key_A_params) # [B, D]
         B = results.get(self.key_B)             # [B, D, Du]
         u = results.get(self.key_u)             # [B, N, Du]
@@ -70,6 +83,9 @@ class BackwardLossBase(BaseLoss):
              if B is None: missing.append(self.key_B)
              if u is None: missing.append(self.key_u)
              raise KeyError(f"BackwardLoss missing keys: {missing}")
+        
+        if self.weight_x > 0 and x is None:
+             raise KeyError(f"BackwardLoss x-space loss enabled but key_x '{self.key_x}' missing.")
              
         dim = A_params.size(-1)
         n_blocks = dim // 2
@@ -80,35 +96,12 @@ class BackwardLossBase(BaseLoss):
         c = torch.cos(theta)
         s = torch.sin(theta)
         
-        return z, B, u, r, c, s
-
-class BackwardStepLoss(BackwardLossBase):
-    def forward(self, results: dict) -> torch.Tensor:
-        z, B, u, r, c, s = self._get_params(results)
-
-        # Step-wise Backward Consistency
-        # Compare predicted z_t (backwards from z_{t+1}) with actual z_t
-        # for all t in the horizon independently.
-        
-        z_curr_gt = z[:, :-1, :]  # z_0 ... z_{N-1}
-        z_next_gt = z[:, 1:, :]   # z_1 ... z_N
-        u_curr = u                # u_0 ... u_{N-1}
-        
-        # Analytic Backward Step (Parallel for all t)
-        z_pred_bwd = self._analytic_backward_step(z_next_gt, u_curr, r, c, s, B)
-        
-        loss_steps = self.loss_fn(z_pred_bwd, z_curr_gt)
-        loss = loss_steps.mean(dim=-1) # [B, N]
-        
-        # Apply weight decay
-        loss = self.apply_weight_decay(loss)
-        
-        return self.weight * loss
+        return z, x, B, u, r, c, s
 
 
 class BackwardRollingLoss(BackwardLossBase):
     def forward(self, results: dict) -> torch.Tensor:
-        z, B, u, r, c, s = self._get_params(results)
+        z, x, B, u, r, c, s = self._get_params(results)
         
         # Rolling Backward
         # Start from last step z_N, roll back to z_0
@@ -120,9 +113,24 @@ class BackwardRollingLoss(BackwardLossBase):
         for k in range(N - 1, -1, -1):
             u_k = u[:, k, :] # [B, Du]
             z_roll = self._analytic_backward_step(z_roll, u_k, r, c, s, B)
+        
+        total_loss = 0.0
+        
+        # 1. Z-space Loss
+        if self.weight_z > 0:
+            z_0_gt = z[:, 0, :]
+            loss_z = ((z_roll - z_0_gt) ** 2).mean(dim=-1).mean()
+            total_loss = total_loss + self.weight_z * loss_z
+
+        # 2. X-space Loss
+        if self.weight_x > 0:
+            if self.decoder is None:
+                raise ValueError("Decoder is not bound. Call bind_model() first.")
             
-        z_0_gt = z[:, 0, :]
-        loss_roll = ((z_roll - z_0_gt) ** 2).mean(dim=-1) # [B]
+            x_pred_bwd_0 = self.decoder(z_roll) # [B, D_x]
+            x_0_gt = x[:, 0, :]
+            loss_x = self.loss_fn(x_pred_bwd_0, x_0_gt).mean(dim=-1).mean()
+            total_loss = total_loss + self.weight_x * loss_x
         
         # Do not apply weight decay for rolling loss
-        return self.weight * loss_roll.mean()
+        return self.weight * total_loss
