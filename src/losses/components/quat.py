@@ -16,10 +16,10 @@ class QuatLoss(BaseLoss):
         self.quat_weight = quat_weight
 
     def _compute_quat_loss(self, q_pred: torch.Tensor, q_target: torch.Tensor) -> torch.Tensor:
-        q_pred_norm = q_pred.norm(dim=-1, keepdim=True) + 1e-8
+        q_pred_norm = q_pred.norm(dim=-1, keepdim=True) + 1e-5
         q_pred_unit = q_pred / q_pred_norm
         
-        q_target_norm = q_target.norm(dim=-1, keepdim=True) + 1e-8
+        q_target_norm = q_target.norm(dim=-1, keepdim=True) + 1e-5
         q_target_unit = q_target / q_target_norm
 
         if self.quat_loss_type == 'geodesic':
@@ -34,7 +34,14 @@ class QuatLoss(BaseLoss):
             diff_plus = (q_pred_unit - q_target_unit).norm(dim=-1)
             diff_minus = (q_pred_unit + q_target_unit).norm(dim=-1)
             quat_loss = torch.min(diff_plus, diff_minus).square() # Use squared distance
+        elif self.quat_loss_type == 'angle':
+            safe_eps = 1e-6 
+            sin_half_theta = torch.sqrt(1.0 - dot ** 2 + safe_eps)
+            cos_half_theta = dot
+            angle_diff = 2.0 * torch.atan2(sin_half_theta, cos_half_theta)
             
+            charb_eps = 1e-3 
+            quat_loss = torch.sqrt(angle_diff**2 + charb_eps**2)
         else:
             raise ValueError(f"Unknown quat_loss_type: {self.quat_loss_type}. Supported: ['geodesic', 'chordal']")
 

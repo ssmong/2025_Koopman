@@ -66,7 +66,7 @@ class LPVModel(nn.Module):
                         if is_A:
                             # A init: r ~ 1 (large logit), theta ~ 0
                             n_blocks = self.latent_dim // 2
-                            last_layer.bias[:n_blocks].fill_(5.0) # Sigmoid(5.0) ~= 0.993
+                            last_layer.bias[:n_blocks].fill_(10.0)
                             last_layer.bias[n_blocks:].fill_(0.0)
                         elif bias is not None:
                             last_layer.bias.copy_(bias)

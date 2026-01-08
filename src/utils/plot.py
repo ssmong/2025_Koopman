@@ -4,8 +4,8 @@ import numpy as np
 import os
 
 def _compute_angle_error(q_a, q_b):
-    q_a = q_a / (q_a.norm(dim=-1, keepdim=True) + 1e-8)
-    q_b = q_b / (q_b.norm(dim=-1, keepdim=True) + 1e-8)
+    q_a = q_a / (q_a.norm(dim=-1, keepdim=True) + 1e-5)
+    q_b = q_b / (q_b.norm(dim=-1, keepdim=True) + 1e-5)
     
     dot = (q_a * q_b).sum(dim=-1).abs()
     dot = torch.clamp(dot, -1.0, 1.0)

@@ -1,7 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from src.losses.components.quat import BaseLoss, QuatLoss
+from src.losses.components.base import BaseLoss
+from src.losses.components.quat import QuatLoss
 
 class IsometryLoss(QuatLoss):
     # Loss calculation: || D_x^2 - s * D_z^2 ||^2
@@ -9,8 +10,8 @@ class IsometryLoss(QuatLoss):
     # s: scale parameter = min_scale + Softplus(param) >= 1
         
     def __init__(self, 
-                 min_scale: float = 1.0,
-                 sample_size: int = 512,
+                 min_scale: float,
+                 sample_size: int,
                  exclude_z_idx: list = None,
                  **kwargs):
         # By enforcing quat_norm_weight=0 (in config), 
@@ -83,7 +84,7 @@ class IsometryLoss(QuatLoss):
             
         dist_z_sq = self._compute_dist_sq(sub_z)
         current_scale = self.min_scale + F.softplus(self.scale_param)
-        loss = F.mse_loss(dist_x_sq, current_scale * dist_z_sq)
+        loss = F.mse_loss(dist_x_sq * current_scale, dist_z_sq)
         
         # Isometry Loss is not applicable to time axis due to sampling
         # Simply perform weight mulpvplication and return
