@@ -1,0 +1,26 @@
+_target_: src.models.model_lpv_2.LPVModel2
+_recursive_: False
+
+defaults:
+  - context: kimi
+  - lifting: veronese_2
+  - matrix: dense
+  - _self_
+
+state_dim: ${data.state_dim}
+control_dim: ${data.control_dim}
+latent_dim: 32
+dt: ${data.pred_dt}
+
+quat_indices: ${data.quat_indices}
+
+# -----------------------------------------------------------------------
+# Decoding Configuration
+# -----------------------------------------------------------------------
+decoding:
+  _target_: src.models.components.block_veronese_2.VeroneseDecoding2
+  _recursive_: False
+  
+  quat_indices: ${..quat_indices}
+  # Reference lifting config params for consistency
+  backbone: ${..lifting.backbone}
