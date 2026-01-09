@@ -7,6 +7,8 @@ quat_indices: ${..quat_indices}
 hidden_size: 256
 num_layers: 3
 
+# Neural Network Backbone Configuration
+# (Used for non-Veronese dimensions)
 backbone:
   _target_: src.models.components.block_resnet.ResNetBlock
   hidden_size: ${..hidden_size}
@@ -14,3 +16,4 @@ backbone:
   use_norm: true
   activation: 
     _target_: torch.nn.SiLU
+    

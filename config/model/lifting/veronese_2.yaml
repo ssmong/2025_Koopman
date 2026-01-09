@@ -1,13 +1,19 @@
 _target_: src.models.components.block_veronese_2.VeroneseLifting2
+_recursive_: False
+
 quat_indices: ${data.quat_indices}
+
+# Expose params for consistency with other lifting modules
+hidden_size: 256
+num_layers: 3
 
 # Neural Network Backbone Configuration
 # (Used for non-Veronese dimensions)
 backbone:
   _target_: src.models.components.block_resnet.ResNetBlock
-  hidden_size: 128
-  num_layers: 2
+  hidden_size: ${..hidden_size}
+  num_layers: ${..num_layers}
   use_norm: true
   activation: 
     _target_: torch.nn.SiLU
-
+    
