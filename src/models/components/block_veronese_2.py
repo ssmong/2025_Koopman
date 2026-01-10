@@ -44,6 +44,10 @@ class VeroneseLifting2(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         q = x[..., self.quat_indices]
+        
+        # Safe normalization to prevent NaN gradients if q is 0
+        q = F.normalize(q, p=2, dim=-1)
+        
         z_veronese = q[..., self.idx_i] * q[..., self.idx_j] * self.scale
         
         if self.backbone is not None:
@@ -94,9 +98,13 @@ class VeroneseDecoding2(nn.Module):
         
         # 1. Anchor Selection: Largest diagonal element
         z_diag = z_veronese[:, self.diag_indices] # [B, 4]
+        
+        # Add epsilon for numerical stability
+        z_diag = torch.clamp(z_diag, min=1e-8)
+        
         val_sq, k_idx = torch.max(z_diag, dim=1)  # [B], [B]
         
-        q_k_abs = torch.sqrt(torch.clamp(val_sq, min=1e-8))
+        q_k_abs = torch.sqrt(val_sq)
         
         # 2. Reconstruct M to extract row k
         M = torch.zeros(B, self.n_quat, self.n_quat, device=z_veronese.device, dtype=z_veronese.dtype)

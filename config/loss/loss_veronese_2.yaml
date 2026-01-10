@@ -1,0 +1,81 @@
+_target_: src.losses.objective.Objective
+
+n_step_max: ${max:${train.train_steps}, ${train.val_steps}, ${train.test_steps}}
+decay: 0.99
+quat_weight: 1.0
+quat_loss_type: geodesic # Options: geodesic, chordal
+quat_norm_weight: 0.1
+
+weights: 
+  pred_x: 1.0
+  pred_z: 1.0
+  recon_z: 0.1
+  veronese_trace: 0.01 
+  isometric: 0.01
+
+targets:
+  # 1. Prediction Loss: || x_gt - x_pred ||^2
+  pred_x:
+    _target_: src.losses.components.quat.QuatLoss
+
+    n_step_max: ${...n_step_max}
+    weight_decay: ${...decay}
+
+    weight: ${...weights.pred_x}
+    key_pred: x_traj
+    key_target: x_traj_gt
+    quat_norm_weight: 0.0 
+    quat_indices: ${data.quat_indices}
+    quat_loss_type: ${...quat_loss_type}
+    quat_weight: ${...quat_weight}
+
+  # 2. Latent Prediction Loss: || z_gt - z_pred ||^2
+  pred_z:
+    _target_: src.losses.components.base.BaseLoss
+
+    n_step_max: ${...n_step_max}
+    weight_decay: ${...decay}
+
+    weight: ${...weights.pred_z}
+    key_pred: z_traj
+    key_target: z_traj_gt
+
+  # 3. Latent Consistency Loss: || z_pred - E(D(z_pred)) ||^2
+  recon_z:
+    _target_: src.losses.components.base.BaseLoss
+
+    n_step_max: ${...n_step_max}
+    weight_decay: ${...decay}
+
+    weight: ${...weights.recon_z}
+    key_pred: z_traj_re
+    key_target: z_traj
+
+  # 4. Veronese Trace Constraint (z space)
+  veronese_trace:
+    _target_: src.losses.components.veronese.VeroneseTraceLoss
+
+    n_step_max: ${...n_step_max}
+    weight_decay: ${...decay}
+
+    weight: ${...weights.veronese_trace}
+    key_pred: z_traj
+    key_target: z_traj_gt
+
+  isometric:
+    _target_: src.losses.components.isometry.IsometryLoss
+    n_step_max: ${...n_step_max}
+    weight_decay: ${...decay}
+    weight: ${...weights.isometric}
+    
+    key_pred: z_traj_gt
+    key_target: x_traj_gt
+    
+    min_scale: 1.0
+    sample_size: 512
+    
+    quat_indices: ${data.quat_indices}
+    quat_norm_weight: ${...quat_norm_weight}
+    quat_loss_type: ${...quat_loss_type}
+    exclude_z_idx: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+

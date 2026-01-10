@@ -118,6 +118,8 @@ class LPVModel2(nn.Module):
         J = W - W.transpose(1, 2)
         
         sigma = F.softplus(params[:, n_sq:])
+        # Clamp sigma to prevent instability
+        sigma = torch.clamp(sigma, min=1e-6, max=100.0)
         
         # Selective Masking
         mask = torch.ones_like(sigma)

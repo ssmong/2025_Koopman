@@ -1,4 +1,4 @@
-_target_: src.models.model_lpv.LPVModel
+_target_: src.models.model_lpv_2.LPVModel2
 _recursive_: False
 
 defaults:
@@ -10,7 +10,7 @@ defaults:
 state_dim: ${data.state_dim}
 control_dim: ${data.control_dim}
 latent_dim: 32
-eigval_max: 1.0
+dt: ${data.pred_dt}
 
 quat_indices: ${data.quat_indices}
 
