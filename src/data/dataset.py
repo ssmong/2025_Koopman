@@ -202,6 +202,7 @@ class KoopmanDataset(Dataset):
         control_key: str,
         angle_indices: List[int],
         quat_indices: List[int],
+        omega_indices: List[int],
         # File specific
         num_seqs: int,
         seq_len: int,
@@ -228,7 +229,8 @@ class KoopmanDataset(Dataset):
         self.control_dim = control_dim
         self.state_key = state_key
         self.control_key = control_key
-        
+
+        self.omega_indices = omega_indices
         self.use_loaded_stats = use_loaded_stats
 
         self.processor = KoopmanDataProcessor(
