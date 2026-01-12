@@ -108,6 +108,27 @@ def plot_trajectory(
         ax.grid(True, alpha=0.3)
         ax.legend(loc='upper right')
 
+    q_axes = []
+    q_min = float('inf')
+    q_max = float('-inf')
+
+    for ax, (title, _, _, _) in zip(axes, plots):
+        if " (q_" in title:
+            q_axes.append(ax)
+            ylim = ax.get_ylim()
+            q_min = min(q_min, ylim[0])
+            q_max = max(q_max, ylim[1])
+    
+    if q_axes:
+        margin = (q_max - q_min) * 0.05
+        q_min -= margin
+        q_max += margin
+        q_min = min(q_min, -1.1)
+        q_max = max(q_max, 1.1)
+        
+        for ax in q_axes:
+            ax.set_ylim(q_min, q_max)
+
     plt.xlabel("Time Step")
     plt.tight_layout()
     
