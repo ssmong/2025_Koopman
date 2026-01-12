@@ -10,6 +10,7 @@ control_key: control_torque
 
 angle_indices: []
 quat_indices: [0, 1, 2, 3]
+omega_indices: [4, 5, 6]
 
 num_seqs: 1000
 seq_len: 1000

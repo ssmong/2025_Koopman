@@ -9,14 +9,16 @@ import hydra
 logger = logging.getLogger(__name__)
 
 """
-Dense LPV Model with modified veronese lifting
+Dense LPV Model with modified veronese lifting (V3)
+Embedding structure: z = [q, w, veronese(q), z_nn]
 """
-class LPVModel2(nn.Module):
+class LPVModel3(nn.Module):
     def __init__(self, 
                  state_dim: int, 
                  control_dim: int,
                  latent_dim: int,
                  quat_indices: List[int],
+                 omega_indices: List[int],
                  context: DictConfig, 
                  lifting: DictConfig,
                  matrix: DictConfig,
@@ -29,26 +31,37 @@ class LPVModel2(nn.Module):
         self.control_dim = control_dim  
         self.latent_dim = latent_dim
         self.dt = dt
-        self.quat_indices = list(quat_indices) if quat_indices is not None else None
+        self.quat_indices = list(quat_indices) if quat_indices is not None else []
+        self.omega_indices = list(omega_indices) if omega_indices is not None else []
         
-        if self.quat_indices is not None and len(self.quat_indices) == 4:
+        if len(self.quat_indices) == 4:
             self.veronese_dim = 10
         else:
-            logger.error("Quat indices are not provided or the length is not 4. Veronese dimension is set to 0.")
-            raise ValueError("Quat indices are not provided or the length is not 4. Veronese dimension is set to 0.")
-
+            self.veronese_dim = 0
+            logger.warning("Quat indices length is not 4. Veronese dimension is set to 0.")
+            
+        self.n_quat = len(self.quat_indices)
+        self.n_omega = len(self.omega_indices)
+        
+        # Calculate where Veronese part starts in z
+        # z = [q, w, veronese, z_nn]
+        self.veronese_start_idx = self.n_quat + self.n_omega
 
         self.encoder = hydra.utils.instantiate(
             lifting, 
             in_features=state_dim, 
-            out_features=latent_dim
+            out_features=latent_dim,
+            quat_indices=self.quat_indices,
+            omega_indices=self.omega_indices
         )   
         
         decoding = decoding if decoding is not None else lifting
         self.decoder = hydra.utils.instantiate(
             decoding, 
             in_features=latent_dim, 
-            out_features=state_dim
+            out_features=state_dim,
+            quat_indices=self.quat_indices,
+            omega_indices=self.omega_indices
         )
 
         if hasattr(self.encoder, 'mixing') and hasattr(self.decoder, 'set_mixing'):
@@ -82,8 +95,9 @@ class LPVModel2(nn.Module):
                 nn.init.zeros_(last_layer.weight)
                 if last_layer.bias is not None:
                     n_sq = self.latent_dim * self.latent_dim
-                    # W (Coupling): Small random noise
-                    last_layer.bias.data[:n_sq].normal_(0, 0.01)
+                    # W (Coupling): Zero initialization to prevent rotation at start
+                    last_layer.bias.data[:n_sq].zero_()
+                    # Sigma (Damping): Init to give small positive damping after softplus
                     last_layer.bias.data[n_sq:].fill_(-5.0)
                     
         def _init_B(module, bias=None):
@@ -97,7 +111,7 @@ class LPVModel2(nn.Module):
 
         _init_A(self._to_A)
         
-        noise = torch.randn(self.latent_dim * self.control_dim) * 1e-5
+        noise = torch.randn(self.latent_dim * self.control_dim) * 1e-5 # Reduced noise
         _init_B(self._to_B, bias=noise)
     
     def get_A_ct(self, h: torch.Tensor):
@@ -119,10 +133,16 @@ class LPVModel2(nn.Module):
         # Clamp sigma to prevent instability
         sigma = torch.clamp(sigma, min=1e-6, max=100.0)
         
-        # Selective Masking
         mask = torch.ones_like(sigma)
         if self.veronese_dim > 0:
-            mask[:, :self.veronese_dim] = 0.0        
+            # Mask the Veronese part
+            start = self.veronese_start_idx
+            end = start + self.veronese_dim
+            if end <= self.latent_dim:
+                mask[:, start:end] = 0.0
+            else:
+                 logger.warning(f"Veronese end index {end} exceeds latent dim {self.latent_dim}")
+                 
         sigma_masked = sigma * mask
         D = torch.diag_embed(sigma_masked)
         
@@ -176,7 +196,7 @@ class LPVModel2(nn.Module):
         x_traj = self.decoder(z_traj)
 
         # Normalize quaternion output during inference/validation
-        if not self.training and self.quat_indices is not None:
+        if not self.training and self.quat_indices:
             x_traj = x_traj.clone()
             q_part = x_traj[..., self.quat_indices]
             q_norm = F.normalize(q_part, p=2, dim=-1)
@@ -185,7 +205,7 @@ class LPVModel2(nn.Module):
         results = {
             "z_traj": z_traj,
             "x_traj": x_traj,
-            "A_params": A_ct, # Returning A_ct for loss/analysis
+            "A_params": A_ct, 
             "B": B_flat.view(A_ct.size(0), self.latent_dim, self.control_dim),
             "u_future": u_future,
             "z_traj_re": self.encoder(x_traj) 
