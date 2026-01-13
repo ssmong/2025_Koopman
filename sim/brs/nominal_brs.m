@@ -1,32 +1,15 @@
 clear; clc; close all;
 
-data_path = "mpbm_10_200_0.1.h5";
-seq_id = 1;
-checkpoint_dir = "2026-01-12/10-45-57";
-
-setenv('SEQ_ID', char(string(seq_id)));
-setenv('DATA_PATH', data_path);
-setenv('CHECKPOINT_DIR', checkpoint_dir);
-
-fprintf("Calling Python script to export matrices for Sequence %d from %s\n", seq_id, data_path);
+% Load pre-exported LPV matrices
+% Run the following command in Docker before running this script:
+%   python sim/brs/export_lpv.py --data_path <DATA_FILE> --checkpoint_dir <CHECKPOINT_DIR> --seq_id 1
 
 currentDir = fileparts(mfilename('fullpath'));
-pyScriptPath = fullfile(currentDir, 'export_lpv.py');
-cmd = sprintf('python "%s"', pyScriptPath);
-
-[status, result] = system(cmd);
-
-if status ~= 0
-    error('Failed to export matrices. MATLAB returned status %d:\n%s', status, result);
-else
-    fprintf("Python script completed successfully.\n");
-end
-
 projectRoot = fileparts(fileparts(currentDir));
 matFilePath = fullfile(projectRoot, 'data', 'brs', 'brs_data.mat');
 
 if ~isfile(matFilePath)
-    error('MAT file was not found at expected path: %s', matFilePath);
+    error('MAT file was not found at expected path: %s\nPlease run export_lpv.py first.', matFilePath);
 else
     fprintf("Loading data from %s...\n", matFilePath);
     load(matFilePath);

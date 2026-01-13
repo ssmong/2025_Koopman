@@ -21,17 +21,34 @@ from src.data.dataset import KoopmanDataProcessor
 
 log = logging.getLogger(__name__)
 
+import argparse
+
 def export_lpv():
+    parser = argparse.ArgumentParser(description="Export LPV model for BRS analysis.")
+    parser.add_argument("--data_path", type=str, required=True, help="Path to raw data H5 file (relative to data/raw or absolute).")
+    parser.add_argument("--seq_id", type=str, default="1", help="Sequence ID to use for linearization.")
+    parser.add_argument("--checkpoint_dir", type=str, required=True, help="Path to checkpoint directory (relative to outputs/learning).")
+    
+    args = parser.parse_args()
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
     
-    # Load parameters from Environment
-    data_path = os.path.join("data/raw", os.environ.get("DATA_PATH")) # Example: "attitude_1000_1000_0.1.h5"
-    seq_id = os.environ.get("SEQ_ID")
-    checkpoint_dir = os.environ.get("CHECKPOINT_DIR") # Example: "2025-01-14/10-00-00"
+    # Load parameters from Args
+    data_path_raw = args.data_path
+    if not os.path.isabs(data_path_raw):
+        data_path = os.path.join("data/raw", data_path_raw)
+    else:
+        data_path = data_path_raw
+        
+    seq_id = args.seq_id
+    checkpoint_dir = args.checkpoint_dir
 
-    if not data_path or not seq_id or not checkpoint_dir:
-        log.error("Environment variables DATA_PATH, SEQ_ID, or CHECKPOINT_DIR are missing.")
-        return
+    if not os.path.exists(data_path):
+         # Try looking in project root
+         if os.path.exists(data_path_raw):
+             data_path = data_path_raw
+         else:
+             raise FileNotFoundError(f"Data file not found: {data_path}")
 
     # Load Config & Model (From Checkpoint)
     base_dir = os.path.join("outputs", "learning", checkpoint_dir)

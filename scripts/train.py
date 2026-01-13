@@ -402,7 +402,7 @@ def main(cfg: DictConfig):
     log.info("\n".join(log_msg))
     log.info("Training and Testing Completed.")
 
-    test_loader_plot = DataLoader(test_dataset, batch_size=1, shuffle=False)
+    test_loader_plot = DataLoader(test_dataset, batch_size=10, shuffle=False)
     
     with torch.no_grad():
         for i, batch in enumerate(test_loader_plot):
@@ -411,24 +411,25 @@ def main(cfg: DictConfig):
                 results = model(n_steps=test_steps, **batch)
             
             if i == 0:
-                x_pred = results['x_traj'][0] 
-                x_gt = results['x_traj_gt'][0]
-                
-                plot_save_path = os.path.join(output_dir, "test_plot.png")
-                plot_trajectory(
-                    pred_dt=cfg.data.pred_dt,
-                    x_pred=x_pred,
-                    x_gt=x_gt,
-                    angle_indices=cfg.data.angle_indices,
-                    quat_indices=cfg.data.quat_indices,
-                    save_path=plot_save_path,
-                    mean=train_dataset.processor.mean,
-                    std=train_dataset.processor.std
-                )
-                
-                wandb.log({"test/trajectory_plot": wandb.Image(plot_save_path)})
-                log.info(f"Test plot uploaded to WandB and saved to {plot_save_path}")
-                break
+                n_plots = 10
+                for k in range(n_plots):
+                    x_pred = results['x_traj'][k] 
+                    x_gt = results['x_traj_gt'][k]
+                    
+                    plot_save_path = os.path.join(output_dir, f"test_plot_{k}.png")
+                    plot_trajectory(
+                        pred_dt=cfg.data.pred_dt,
+                        x_pred=x_pred,
+                        x_gt=x_gt,
+                        angle_indices=cfg.data.angle_indices,
+                        quat_indices=cfg.data.quat_indices,
+                        save_path=plot_save_path,
+                        mean=train_dataset.processor.mean,
+                        std=train_dataset.processor.std
+                    )
+                    
+                    wandb.log({f"test/trajectory_plot_{k}": wandb.Image(plot_save_path)})
+                    log.info(f"Test plot {k} uploaded to WandB and saved to {plot_save_path}")
 
     wandb.finish()
 
