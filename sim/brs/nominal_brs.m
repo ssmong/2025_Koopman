@@ -96,7 +96,7 @@ stats.x_mean = x_mean;
 stats.x_std = x_std;
 
 % Visualization Options
-n_samples = 3000;
+n_samples = 1000;
 selected_opts = [1, 2, 3];
 
 vis_brs_options(Max_BRS, stats, n_z, w_lb, w_ub, n_samples, selected_opts);

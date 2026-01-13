@@ -38,6 +38,10 @@ class QuatLoss(BaseLoss):
             safe_eps = 1e-6 
             # Double Cover Handling
             cos_half_theta = (q_pred_unit * q_target_unit).sum(dim=-1).abs()
+            
+            # Re-introduce clamp for stability
+            cos_half_theta = torch.clamp(cos_half_theta, min=0.0, max=1.0 - safe_eps)
+            
             sin_half_theta = torch.sqrt(1.0 - cos_half_theta ** 2 + safe_eps)
             angle_diff = 2.0 * torch.atan2(sin_half_theta, cos_half_theta)
             
