@@ -116,19 +116,30 @@ def main(cfg: DictConfig):
 
     if pretrained_dir:
         log.info(f"Fine-tuning mode: Loading from outputs/learning/{pretrained_dir}")
-        model = load_finetune_model(
+        # Instantiate model first (empty)
+        model = hydra.utils.instantiate(cfg.model)
+        model.to(device)
+        
+        # Instantiate criterion first
+        criterion = hydra.utils.instantiate(cfg.loss, n_step_max=n_step_max)
+        criterion.bind_model(model)
+        criterion.to(device)
+
+        # Load weights into model AND criterion
+        load_finetune_model(
             cfg=cfg, 
             pretrained_dir=pretrained_dir, 
             device=device,
-            strict=True 
+            strict=True,
+            criterion=criterion
         )
     else:
         model = hydra.utils.instantiate(cfg.model)
         model.to(device)
     
-    criterion = hydra.utils.instantiate(cfg.loss, n_step_max=n_step_max)
-    criterion.bind_model(model)
-    criterion.to(device)
+        criterion = hydra.utils.instantiate(cfg.loss, n_step_max=n_step_max)
+        criterion.bind_model(model)
+        criterion.to(device)
     
     # Remove duplicates from combined_params
     param_set = set()
@@ -179,6 +190,35 @@ def main(cfg: DictConfig):
     if max_steps > train_steps:
         raise ValueError(f"Max steps ({max_steps}) cannot be greater than dataset prediction length ({train_steps})")
     
+    # ------------------------------------------------------------------
+    #       3.1 Pre-validation (Check loaded model performance)
+    # ------------------------------------------------------------------
+    if pretrained_dir:
+        log.info("Performing Pre-validation to check loaded model performance...")
+        model.eval()
+        pre_val_metrics_sum = {}
+        with torch.no_grad():
+            for batch in tqdm(val_loader, desc="Pre-validation"):
+                batch = {k: v.to(device) for k, v in batch.items()}
+                with torch.amp.autocast(enabled=True, device_type=device.type):
+                    results = model(n_steps=test_steps, **batch)
+                    _, metrics = criterion(results)
+                
+                for k, v in metrics.items():
+                    val = v.item() if isinstance(v, torch.Tensor) else v
+                    pre_val_metrics_sum[k] = pre_val_metrics_sum.get(k, 0.0) + val
+        
+        avg_pre_val_metrics = {k: v / len(val_loader) for k, v in pre_val_metrics_sum.items()}
+        pre_val_loss = avg_pre_val_metrics.get("loss/total", float('inf'))
+        
+        log.info(f"Pre-validation Total Loss: {pre_val_loss:.6f}")
+        for k, v in avg_pre_val_metrics.items():
+            log.info(f"Pre-val {k}: {v:.6f}")
+        
+        # Initialize EarlyStopping with current performance to prevent overwriting with worse model
+        early_stopping.val_loss_min = pre_val_loss
+        log.info(f"Initialized EarlyStopping best score with {pre_val_loss:.6f}")
+
     global_step = 0 # For logging WandB
 
     for epoch in range(epochs):
@@ -245,6 +285,15 @@ def main(cfg: DictConfig):
             step_log['epoch'] = epoch
             step_log['train/grad_norm'] = total_norm
             step_log['train/lr'] = optimizer.param_groups[0]['lr']
+            
+            # Log Isometry Scale Param if available
+            if hasattr(criterion, 'targets') and 'isometric' in criterion.targets:
+                iso_loss = criterion.targets['isometric']
+                if hasattr(iso_loss, 'scale_param'):
+                    import torch.nn.functional as F
+                    current_scale = iso_loss.min_scale + F.softplus(iso_loss.scale_param)
+                    step_log['train/iso_scale'] = current_scale.item()
+
             wandb.log(step_log, step=global_step)
             global_step += 1
 
@@ -331,7 +380,7 @@ def main(cfg: DictConfig):
             else:
                 scheduler.step()
             
-        early_stopping(val_total_loss, model)
+        early_stopping(val_total_loss, model, criterion)
         if early_stopping.early_stop:
             log.info("Early stopping triggered.")
             break
@@ -345,7 +394,15 @@ def main(cfg: DictConfig):
 
     if os.path.exists(best_model_path):
         log.info(f"Loading best model from {best_model_path}")
-        model.load_state_dict(torch.load(best_model_path, map_location=device))
+        # Use updated loading logic to handle both formats
+        checkpoint = torch.load(best_model_path, map_location=device)
+        if isinstance(checkpoint, dict) and 'model' in checkpoint:
+            model.load_state_dict(checkpoint['model'])
+            # We don't necessarily need to load criterion for testing, but good for consistency
+            if 'criterion' in checkpoint:
+                criterion.load_state_dict(checkpoint['criterion'])
+        else:
+            model.load_state_dict(checkpoint)
     else:
         log.warning(f"Best model not found at {best_model_path}. Using current model weights.")
 
@@ -430,6 +487,7 @@ def main(cfg: DictConfig):
                     
                     wandb.log({f"test/trajectory_plot_{k}": wandb.Image(plot_save_path)})
                     log.info(f"Test plot {k} uploaded to WandB and saved to {plot_save_path}")
+                break
 
     wandb.finish()
 

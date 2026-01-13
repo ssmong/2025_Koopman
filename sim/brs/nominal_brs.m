@@ -72,7 +72,7 @@ end
 
 %% 3. Create Maximal BRS Object
 % PolyUnion을 사용하여 합집합 객체 생성
-Max_BRS = PolyUnion(BRS_Array);
+BRS = PolyUnion(BRS_Array);
 
 %% 4. Visualization & Verification
 stats.x_mean = x_mean;
@@ -82,4 +82,4 @@ stats.x_std = x_std;
 n_samples = 1000;
 selected_opts = [1, 2, 3];
 
-vis_brs_options(Max_BRS, stats, n_z, w_lb, w_ub, n_samples, selected_opts);
+plot_brs(BRS, stats, n_z, w_lb, w_ub, n_samples, selected_opts);

@@ -1,10 +1,10 @@
-function vis_brs_options(Max_BRS, stats, n_z, w_lb, w_ub, n_samples, selected_options)
+function plot_brs(BRS, stats, n_z, w_lb, w_ub, n_samples, selected_options)
 % VIS_BRS_OPTIONS
 %   Visualizes BRS analysis results on the quaternion sphere using Mesh Interpolation.
 %   Uses Fibonacci Lattice for uniform sampling on the visualization sphere.
 
     arguments
-        Max_BRS
+        BRS
         stats
         n_z (1,1) double
         w_lb (3,1) double
@@ -72,7 +72,7 @@ function vis_brs_options(Max_BRS, stats, n_z, w_lb, w_ub, n_samples, selected_op
         % Option 1 & 3
         if need_slicing
             try
-                Slice_P = Max_BRS.slice(idx_q, q_curr_norm);
+                Slice_P = BRS.slice(idx_q, q_curr_norm);
                 
                 if ~isempty(z_nn_zero)
                     idx_others = setdiff(1:n_z, [idx_q, idx_w]);
@@ -101,7 +101,7 @@ function vis_brs_options(Max_BRS, stats, n_z, w_lb, w_ub, n_samples, selected_op
             % w=0 physical -> (0 - mean) / std
             w_rest_norm = (zeros(3,1) - w_mean) ./ w_std;
             z_test = [q_curr_norm; w_rest_norm; z_nn_zero];
-            if Max_BRS.contains(z_test)
+            if BRS.contains(z_test)
                 res_opt2_rest(i) = true;
             end
         end
