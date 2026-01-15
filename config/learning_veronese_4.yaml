@@ -1,0 +1,10 @@
+defaults:
+  - train: train_default
+  - data: attitude # or mpbm, depending on usage, but default to attitude
+  - model: model_lpv_veronese_4
+  - loss: loss_veronese_4
+  - _self_
+
+name: "lpv_veronese_4_spectral"
+seed: 42
+

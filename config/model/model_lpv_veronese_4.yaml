@@ -1,0 +1,40 @@
+_target_: src.models.model_lpv_4.LPVModel4
+
+state_dim: ${data.state_dim}
+control_dim: ${data.control_dim}
+latent_dim: 24 # 4 (quat) + 3 (omega) + 10 (veronese) + 7 (nn) = 24
+dt: ${data.dt}
+
+quat_indices: ${data.quat_indices}
+omega_indices: ${data.omega_indices}
+
+context:
+  _target_: src.models.components.context_encoder.ContextEncoder
+  in_features: ${eval:'${data.state_dim} + ${data.control_dim}'}
+  hidden_size: 64
+  num_layers: 2
+
+lifting:
+  _target_: src.models.components.block_veronese_4.VeroneseLifting4
+  # out_features here is the TOTAL latent dim
+  # Logic in block: nn_dim = out_features - (n_q + n_w + n_veronese)
+  # 24 - (4 + 3 + 10) = 7
+  backbone:
+    _target_: src.models.components.mlp.MLP
+    hidden_sizes: [64, 64]
+    activation: "gelu"
+
+decoding:
+  _target_: src.models.components.block_veronese_4.VeroneseDecoding4
+  # in_features is latent_dim
+  # out_features is state_dim
+  backbone:
+    _target_: src.models.components.mlp.MLP
+    hidden_sizes: [64, 64]
+    activation: "gelu"
+
+matrix:
+  _target_: src.models.components.mlp.MLP
+  hidden_sizes: [128, 128]
+  activation: "gelu"
+

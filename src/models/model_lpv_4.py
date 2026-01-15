@@ -9,10 +9,14 @@ import hydra
 logger = logging.getLogger(__name__)
 
 """
-Dense LPV Model with modified veronese lifting (V3)
-Embedding structure: z = [q, w, veronese(q), z_nn]
+Dense LPV Model (V4) - "Unconstrained & Invertible"
+Reflecting conversation:
+1. z = [q, w, veronese(q), z_nn]
+2. Dynamics: z_{k+1} = Cayley(A_ct) * z_k + B * u_k
+3. A_ct is fully learnable (no skew-symmetric constraints)
+4. Cayley map ensures invertibility and handles large dt better than simple Euler.
 """
-class LPVModel3(nn.Module):
+class LPVModel4(nn.Module):
     def __init__(self, 
                  state_dim: int, 
                  control_dim: int,
@@ -43,10 +47,10 @@ class LPVModel3(nn.Module):
         self.n_quat = len(self.quat_indices)
         self.n_omega = len(self.omega_indices)
         
-        # Calculate where Veronese part starts in z
         # z = [q, w, veronese, z_nn]
         self.veronese_start_idx = self.n_quat + self.n_omega
 
+        # 1. Encoder (Lifting)
         self.encoder = hydra.utils.instantiate(
             lifting, 
             in_features=state_dim, 
@@ -55,6 +59,7 @@ class LPVModel3(nn.Module):
             omega_indices=self.omega_indices
         )   
         
+        # 2. Decoder (Retraction)
         decoding = decoding if decoding is not None else lifting
         self.decoder = hydra.utils.instantiate(
             decoding, 
@@ -67,14 +72,15 @@ class LPVModel3(nn.Module):
         if hasattr(self.encoder, 'mixing') and hasattr(self.decoder, 'set_mixing'):
             self.decoder.set_mixing(self.encoder.mixing)
 
+        # 3. Context Encoder
         self.ctxt_encoder = hydra.utils.instantiate(context)
         
-        # Dense Matrix Generation Parameters
-        # Output size: (N*N for Coupling W) + (N for Damping Sigma)
+        # 4. Dense Matrix Generation Parameters
+        # Changed: Just output a full NxN matrix. No structural constraints.
         self._to_A = hydra.utils.instantiate(
             matrix,
             in_features=context.hidden_size,
-            out_features=self.latent_dim * self.latent_dim + self.latent_dim 
+            out_features=self.latent_dim * self.latent_dim 
         )
         
         self._to_B = hydra.utils.instantiate(
@@ -86,19 +92,15 @@ class LPVModel3(nn.Module):
         self._init_weights()
 
     def _init_weights(self):
-        # Initialize A
-        # Coupling(W) is around 0, 
-        # Damping(Sigma) is slightly negative (before softplus)
+        # Initialize A to be near zero -> A_dt near Identity
         def _init_A(module):
             last_layer = list(module.modules())[-1]
             if isinstance(last_layer, nn.Linear):
                 nn.init.zeros_(last_layer.weight)
                 if last_layer.bias is not None:
-                    n_sq = self.latent_dim * self.latent_dim
-                    # W (Coupling): Zero initialization to prevent rotation at start
-                    last_layer.bias.data[:n_sq].zero_()
-                    # Sigma (Damping): Init to give small positive damping after softplus
-                    last_layer.bias.data[n_sq:].fill_(-5.0)
+                    # Initialize to small random noise to break symmetry, 
+                    # but close to 0 to ensure A_dt starts as Identity.
+                    nn.init.normal_(last_layer.bias, mean=0.0, std=1e-4)
                     
         def _init_B(module, bias=None):
             last_layer = list(module.modules())[-1]
@@ -111,60 +113,46 @@ class LPVModel3(nn.Module):
 
         _init_A(self._to_A)
         
-        noise = torch.randn(self.latent_dim * self.control_dim) * 1e-5 # Reduced noise
+        noise = torch.randn(self.latent_dim * self.control_dim) * 1e-5 
         _init_B(self._to_B, bias=noise)
-    
-    def get_A_ct(self, h: torch.Tensor):
-        """
-        Constructs Continuous-time Dense A matrix: A = (W - W.T) - Mask * D
-        Args:
-            h: Context embedding [B, hidden_size]
-        """
-        params = self._to_A(h)
-        
+
+    def get_A_ct(self, h):
+        """Reshape output of _to_A into (Batch, N, N)"""
         batch_size = h.size(0)
-        n_sq = self.latent_dim * self.latent_dim
-        
-        W_flat = params[:, :n_sq]
-        W = W_flat.view(batch_size, self.latent_dim, self.latent_dim)
-        J = W - W.transpose(1, 2)
-        
-        sigma = F.softplus(params[:, n_sq:])
-        # Clamp sigma to prevent instability
-        sigma = torch.clamp(sigma, min=1e-6, max=100.0)
-        
-        mask = torch.ones_like(sigma)
+        A_flat = self._to_A(h)
+        return A_flat.view(batch_size, self.latent_dim, self.latent_dim)
 
-        # Mask the Quaternion part
-        mask[:, :self.n_quat] = 0.0
-
-        # Mask the Veronese part
-        start = self.veronese_start_idx
-        end = start + self.veronese_dim
-        if end <= self.latent_dim:
-            mask[:, start:end] = 0.0
-        else:
-            logger.warning(f"Veronese end index {end} exceeds latent dim {self.latent_dim}")
-                 
-        sigma_masked = sigma * mask
-        D = torch.diag_embed(sigma_masked)
+    def _cayley_map(self, A_ct):
+        """
+        Cayley transform for fast and invertible discretization.
+        A_dt = (I - dt/2 * A_ct)^-1 @ (I + dt/2 * A_ct)
+        Approximates exp(A_ct * dt).
+        """
+        B, N, _ = A_ct.shape
+        dt = self.dt
+        device = A_ct.device
+        I = torch.eye(N, device=device).unsqueeze(0).expand(B, -1, -1)
         
-        A_ct = J - D
-        return A_ct
-
-    def _cayley_map(self, A_ct: torch.Tensor) -> torch.Tensor:
-        I = torch.eye(self.latent_dim, device=A_ct.device).unsqueeze(0)
+        # Terms for Crank-Nicolson / Cayley
+        # T1 = I - 0.5*dt*A
+        # T2 = I + 0.5*dt*A
+        factor = 0.5 * dt * A_ct
+        lhs = I - factor
+        rhs = I + factor
         
-        A_half = A_ct * (self.dt * 0.5)
+        # Solve linear system instead of explicit inverse for speed & stability
+        # Solves X such that lhs @ X = rhs
+        A_dt = torch.linalg.solve(lhs, rhs)
         
-        U = I - A_half
-        V = I + A_half
-        return torch.linalg.solve(U, V)
+        return A_dt
 
     def _forward_dynamics(self, z, A_ct, B_flat, u):
         batch_size = z.size(0)
+        
+        # Apply Cayley Map to get Discrete A
         A_dt = self._cayley_map(A_ct)
         
+        # Linear Dynamics: z_{k+1} = A_dt @ z_k + B @ u_k
         Az = torch.einsum('bij,bj->bi', A_dt, z)
         
         B_mat = B_flat.view(batch_size, self.latent_dim, self.control_dim)
@@ -183,7 +171,7 @@ class LPVModel3(nn.Module):
         ctxt = torch.cat([x_history, u_history], dim=-1)
         h, _, _ = self.ctxt_encoder(ctxt)
         
-        # Compute A_continuous once (Frozen-time LPV)
+        # Compute A_continuous and B once (Frozen-time LPV)
         A_ct = self.get_A_ct(h)
         B_flat = self._to_B(h)
 
@@ -208,7 +196,7 @@ class LPVModel3(nn.Module):
         results = {
             "z_traj": z_traj,
             "x_traj": x_traj,
-            "A_params": A_ct, 
+            "A_params": A_ct,  # Return continuous A for regularization (e.g., Eigenvalue penalty)
             "B": B_flat.view(A_ct.size(0), self.latent_dim, self.control_dim),
             "u_future": u_future,
             "z_traj_re": self.encoder(x_traj) 
@@ -225,13 +213,13 @@ class LPVModel3(nn.Module):
 
     def get_A(self, x_history: torch.Tensor, u_history: torch.Tensor):
         """
-        Returns Discrete-time A matrix: A_dt = exp(A_ct * dt)
+        Returns Discrete-time A matrix using Cayley Map
         """
         ctxt = torch.cat([x_history, u_history], dim=-1)
         h, _, _ = self.ctxt_encoder(ctxt)
         
         A_ct = self.get_A_ct(h)
-        A_dt = torch.matrix_exp(A_ct * self.dt)
+        A_dt = self._cayley_map(A_ct)
         
         return A_dt
     
