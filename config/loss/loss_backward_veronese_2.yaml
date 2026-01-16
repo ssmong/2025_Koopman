@@ -92,7 +92,7 @@ targets:
 
     key_z: z_traj_gt
     key_x: x_traj_gt
-    key_A_params: A_params # Dense A_ct matrix
+    key_A_ct: A_ct # Dense A_ct matrix
     key_B: B
     key_u: u_future
     

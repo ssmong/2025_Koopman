@@ -76,6 +76,36 @@ class LPVModel(nn.Module):
         noise = torch.randn(self.latent_dim * self.control_dim) * 1e-4
         _init_layer(self._to_B, bias=noise)
     
+    def _construct_A_matrix(self, A_params):
+        """Helper to reconstruct full A matrix from params"""
+        batch_size = A_params.size(0)
+        n_blocks = self.latent_dim // 2
+
+        log_r = A_params[:, :n_blocks]
+        theta = A_params[:, n_blocks:]
+
+        r = self.eigval_max * torch.sigmoid(log_r)
+        c = torch.cos(theta)
+        s = torch.sin(theta)
+
+        A = torch.zeros(batch_size, self.latent_dim, self.latent_dim, device=A_params.device)
+        
+        indices = torch.arange(n_blocks, device=A_params.device)
+        even_indices = 2 * indices
+        odd_indices = 2 * indices + 1
+
+        # Diagonal elements: r * cos(theta)
+        rc = r * c
+        A[:, even_indices, even_indices] = rc
+        A[:, odd_indices, odd_indices] = rc
+        
+        # Off-diagonal elements
+        rs = r * s
+        A[:, even_indices, odd_indices] = -rs
+        A[:, odd_indices, even_indices] = rs
+        
+        return A
+
     def _forward_dynamics(self, z, A_params, B_flat, u):
         batch_size = z.size(0)
         n_blocks = self.latent_dim // 2
@@ -137,28 +167,20 @@ class LPVModel(nn.Module):
             q_norm = F.normalize(q_part, p=2, dim=-1)
             x_traj[..., self.quat_indices] = q_norm.to(dtype=x_traj.dtype)
         
+        # Explicitly construct A_dt for return
+        A_dt = self._construct_A_matrix(A_params)
+
         results = {
             "z_traj": z_traj,
             "x_traj": x_traj,
+            "A_params": A_params, # Kept for backward compatibility with Block Backward Loss
+            "A_dt": A_dt, # New: Explicit Discrete A matrix
+            "B": B_flat.view(A_params.size(0), self.latent_dim, self.control_dim),
+            "u_future": u_future,
+            "z_traj_re": self.encoder(x_traj),
+            "x_traj_gt": torch.cat([x_init.unsqueeze(1), x_future], dim=1),
         }
-
-        # --- Expose params for Backward/Consistency Losses ---
-        # Pass parameters instead of constructing full A matrix for analytic inversion
-        results["A_params"] = A_params
-        
-        batch_size = A_params.size(0)
-        results["B"] = B_flat.view(batch_size, self.latent_dim, self.control_dim)
-        results["u_future"] = u_future
-        
-        # 1. Latent Consistency: z_traj_re = E(x_traj) should match z_traj
-        results["z_traj_re"] = self.encoder(x_traj) 
-
-        # 2. GT Trajectories
-        x_traj_gt = torch.cat([x_init.unsqueeze(1), x_future], dim=1)  # [B, N+1, D]
-        results["x_traj_gt"] = x_traj_gt
-        
-        z_traj_gt = self.encoder(x_traj_gt)
-        results["z_traj_gt"] = z_traj_gt           
+        results["z_traj_gt"] = self.encoder(results["x_traj_gt"])
             
         return results
     
@@ -170,34 +192,7 @@ class LPVModel(nn.Module):
         ctxt = torch.cat([x_history, u_history], dim=-1)
         h, _, _ = self.ctxt_encoder(ctxt)
         A_params = self._to_A(h)
-
-        batch_size = A_params.size(0)
-        n_blocks = self.latent_dim // 2
-
-        log_r = A_params[:, :n_blocks]
-        theta = A_params[:, n_blocks:]
-
-        r = self.eigval_max * torch.sigmoid(log_r)
-        c = torch.cos(theta)
-        s = torch.sin(theta)
-
-        A = torch.zeros(batch_size, self.latent_dim, self.latent_dim, device=A_params.device)
-        
-        indices = torch.arange(n_blocks, device=A_params.device)
-        even_indices = 2 * indices
-        odd_indices = 2 * indices + 1
-
-        # Diagonal elements: r * cos(theta)
-        rc = r * c
-        A[:, even_indices, even_indices] = rc
-        A[:, odd_indices, odd_indices] = rc
-        
-        # Off-diagonal elements
-        rs = r * s
-        A[:, even_indices, odd_indices] = -rs
-        A[:, odd_indices, even_indices] = rs
-        
-        return A
+        return self._construct_A_matrix(A_params)
     
     def get_B(self, x_history: torch.Tensor, u_history: torch.Tensor):
         ctxt = torch.cat([x_history, u_history], dim=-1)

@@ -161,10 +161,9 @@ class LPVModel3(nn.Module):
         V = I + A_half
         return torch.linalg.solve(U, V)
 
-    def _forward_dynamics(self, z, A_ct, B_flat, u):
+    def _forward_dynamics(self, z, A_dt, B_flat, u):
         batch_size = z.size(0)
-        A_dt = self._cayley_map(A_ct)
-        
+
         Az = torch.einsum('bij,bj->bi', A_dt, z)
         
         B_mat = B_flat.view(batch_size, self.latent_dim, self.control_dim)
@@ -187,12 +186,15 @@ class LPVModel3(nn.Module):
         A_ct = self.get_A_ct(h)
         B_flat = self._to_B(h)
 
+        # Precompute Discrete A
+        A_dt = self._cayley_map(A_ct)
+
         z_curr = self.encoder(x_init)
         z_traj = [z_curr]
 
         for k in range(n_steps):
             u_k = u_future[:, k, :]
-            z_curr = self._forward_dynamics(z_curr, A_ct, B_flat, u_k)
+            z_curr = self._forward_dynamics(z_curr, A_dt, B_flat, u_k)
             z_traj.append(z_curr)
         
         z_traj = torch.stack(z_traj, dim=1)
@@ -208,7 +210,8 @@ class LPVModel3(nn.Module):
         results = {
             "z_traj": z_traj,
             "x_traj": x_traj,
-            "A_params": A_ct, 
+            "A_ct": A_ct, 
+            "A_dt": A_dt, # New
             "B": B_flat.view(A_ct.size(0), self.latent_dim, self.control_dim),
             "u_future": u_future,
             "z_traj_re": self.encoder(x_traj) 
@@ -231,7 +234,7 @@ class LPVModel3(nn.Module):
         h, _, _ = self.ctxt_encoder(ctxt)
         
         A_ct = self.get_A_ct(h)
-        A_dt = torch.matrix_exp(A_ct * self.dt)
+        A_dt = self._cayley_map(A_ct)
         
         return A_dt
     

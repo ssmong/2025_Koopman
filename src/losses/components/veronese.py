@@ -68,6 +68,6 @@ class VeroneseConsistencyLoss(BaseLoss):
         # Compute explicit Veronese map
         v_target = q_norm[..., self.idx_i] * q_norm[..., self.idx_j] * self.scale
         
-        loss = ((v_pred - v_target) ** 2).sum(dim=-1).mean()
+        loss = ((v_pred - v_target) ** 2).sum(dim=-1).mean(dim=0)
         
         return self.weight * self.apply_weight_decay(loss)

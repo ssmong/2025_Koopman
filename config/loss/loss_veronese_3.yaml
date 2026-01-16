@@ -71,6 +71,10 @@ targets:
     weight_decay: ${...decay}
     weight: ${...weights.veronese_consistency}
     
+    # Required by BaseLoss
+    key_pred: z_traj
+    key_target: z_traj_gt # Dummy target
+
     # Defaults
     veronese_dim: 10
     veronese_start_dim: 7 # 4(q)+3(w)

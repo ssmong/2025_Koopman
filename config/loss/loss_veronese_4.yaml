@@ -50,6 +50,10 @@ targets:
     weight_decay: ${...decay}
     weight: ${...weights.veronese_consistency}
     
+    # Required by BaseLoss
+    key_pred: z_traj
+    key_target: z_traj_gt # Dummy target
+
     # Defaults
     veronese_dim: 10
     veronese_start_dim: 7 # 4(q)+3(w)
@@ -64,9 +68,12 @@ targets:
     weight_decay: ${...decay}
     weight: ${...weights.spectral}
     
-    mode: continuous # Since Cayley map maps Re(lam)<0 to |z|<1
-    margin: 0.0 # Re(lam) <= 0
-    key_A_params: A_params
+    # Required by BaseLoss
+    key_pred: A_dt
+    key_target: A_dt # Dummy target
+
+    margin: 0.0 
+    key_A: A_dt # Using Discrete A directly from model
 
   isometric:
     _target_: src.losses.components.isometry.IsometryLoss
@@ -85,4 +92,3 @@ targets:
     quat_loss_type: ${...quat_loss_type}
     # Exclude q(0-3), w(4-6), veronese(7-16) -> Total 17 indices to exclude
     exclude_z_idx: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
-

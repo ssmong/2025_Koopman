@@ -1,10 +1,21 @@
+_recursive_: False
+
 defaults:
+  - data: attitude
+  - model: model_lpv_veronese_4       
+  - loss: loss_veronese_4       
   - train: train_default
-  - data: attitude # or mpbm, depending on usage, but default to attitude
-  - model: model_lpv_veronese_4
-  - loss: loss_veronese_4
   - _self_
 
-name: "lpv_veronese_4_spectral"
-seed: 42
+wandb:
+  project: "2025-koopman"
+  entity: null
+  group: "veronese_4"
+  mode: "online"
 
+hydra:
+  run:
+    dir: outputs/learning/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    dir: outputs/learning/sweep/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra.job.num}

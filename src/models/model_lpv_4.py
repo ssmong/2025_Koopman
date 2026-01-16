@@ -146,12 +146,8 @@ class LPVModel4(nn.Module):
         
         return A_dt
 
-    def _forward_dynamics(self, z, A_ct, B_flat, u):
+    def _forward_dynamics(self, z, A_dt, B_flat, u):
         batch_size = z.size(0)
-        
-        # Apply Cayley Map to get Discrete A
-        A_dt = self._cayley_map(A_ct)
-        
         # Linear Dynamics: z_{k+1} = A_dt @ z_k + B @ u_k
         Az = torch.einsum('bij,bj->bi', A_dt, z)
         
@@ -175,12 +171,15 @@ class LPVModel4(nn.Module):
         A_ct = self.get_A_ct(h)
         B_flat = self._to_B(h)
 
+        # Compute Discrete A once
+        A_dt = self._cayley_map(A_ct)
+
         z_curr = self.encoder(x_init)
         z_traj = [z_curr]
 
         for k in range(n_steps):
             u_k = u_future[:, k, :]
-            z_curr = self._forward_dynamics(z_curr, A_ct, B_flat, u_k)
+            z_curr = self._forward_dynamics(z_curr, A_dt, B_flat, u_k)
             z_traj.append(z_curr)
         
         z_traj = torch.stack(z_traj, dim=1)
@@ -196,7 +195,8 @@ class LPVModel4(nn.Module):
         results = {
             "z_traj": z_traj,
             "x_traj": x_traj,
-            "A_params": A_ct,  # Return continuous A for regularization (e.g., Eigenvalue penalty)
+            "A_ct": A_ct,  # Explicitly return Continuous A
+            "A_dt": A_dt,  # Explicitly return Discrete A
             "B": B_flat.view(A_ct.size(0), self.latent_dim, self.control_dim),
             "u_future": u_future,
             "z_traj_re": self.encoder(x_traj) 

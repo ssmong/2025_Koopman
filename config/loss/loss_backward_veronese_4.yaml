@@ -52,6 +52,10 @@ targets:
     weight_decay: ${...decay}
     weight: ${...weights.veronese_consistency}
     
+    # Required by BaseLoss
+    key_pred: z_traj
+    key_target: z_traj_gt
+
     # Defaults
     veronese_dim: 10
     veronese_start_dim: 7 # 4(q)+3(w)
@@ -66,9 +70,12 @@ targets:
     weight_decay: ${...decay}
     weight: ${...weights.spectral}
     
-    mode: continuous 
+    # Required by BaseLoss
+    key_pred: A_dt
+    key_target: A_dt
+
     margin: 0.0 
-    key_A_params: A_params
+    key_A: A_dt # Using Discrete A directly from model
 
   isometric:
     _target_: src.losses.components.isometry.IsometryLoss
@@ -92,15 +99,14 @@ targets:
   backward_roll:
     _target_: src.losses.components.backward_dense.BackwardRollingLossDense
     n_step_max: ${...n_step_max}
-    weight_decay: 1.0 # 1.0 means no decay unless specified otherwise in component
+    weight_decay: 1.0 
     weight: 1.0 # Base weight
 
     key_z: z_traj_gt
     key_x: x_traj_gt
-    key_A_params: A_params
+    key_A_ct: A_ct # Using Continuous A for backward Cayley map
     key_B: B
     key_u: u_future
     
     weight_z: ${...weights.backward_roll_z}
     weight_x: ${...weights.backward_roll_x}
-

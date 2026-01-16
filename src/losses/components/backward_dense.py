@@ -6,7 +6,7 @@ class BackwardRollingLossDense(BaseLoss):
     def __init__(self,
                  key_z: str = "z_traj_gt",
                  key_x: str = "x_traj_gt",
-                 key_A_params: str = "A_params",
+                 key_A_ct: str = "A_ct",
                  key_B: str = "B",
                  key_u: str = "u_future",
                  weight_z: float = 1.0,
@@ -17,7 +17,7 @@ class BackwardRollingLossDense(BaseLoss):
         
         self.key_z = key_z
         self.key_x = key_x
-        self.key_A_params = key_A_params
+        self.key_A_ct = key_A_ct
         self.key_B = key_B
         self.key_u = key_u
         self.weight_z = weight_z
@@ -56,12 +56,12 @@ class BackwardRollingLossDense(BaseLoss):
         z = results.get(self.key_z)             # [B, N+1, D]
         x = results.get(self.key_x) if self.weight_x > 0 else None
         
-        A_ct = results.get(self.key_A_params)   # [B, D, D] (Dense A_ct)
+        A_ct = results.get(self.key_A_ct)       # [B, D, D] (Dense A_ct)
         B = results.get(self.key_B)             # [B, D, Du]
         u = results.get(self.key_u)             # [B, N, Du]
 
         if z is None or A_ct is None or B is None or u is None:
-             raise KeyError(f"BackwardLossDense missing keys. Check if model returns 'A_params' as dense matrix.")
+             raise KeyError(f"BackwardLossDense missing keys. Check if model returns '{self.key_A_ct}' as dense matrix.")
         
         # 1. Compute Backward Dynamics Matrix for each batch
         # A_inv: [B, D, D]
@@ -107,4 +107,3 @@ class BackwardRollingLossDense(BaseLoss):
             total_loss = total_loss + self.weight_x * loss_x
         
         return self.weight * total_loss
-

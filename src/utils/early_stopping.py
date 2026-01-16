@@ -26,7 +26,7 @@ class EarlyStopping:
         if self.best_loss is None:
             self.best_loss = val_loss
             self.save_checkpoint(val_loss, model, criterion)
-        elif val_loss < self.best_loss + self.delta:
+        elif val_loss < self.best_loss - self.delta:
             self.best_loss = val_loss
             self.save_checkpoint(val_loss, model, criterion)
             self.counter = 0
