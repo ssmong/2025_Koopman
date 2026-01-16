@@ -79,6 +79,13 @@ def main(cfg: DictConfig):
         stats_dir=stats_dir
     )
 
+    test_dataset = hydra.utils.instantiate(
+        cfg.data, 
+        split="test", 
+        train_steps=test_steps,
+        stats_dir=stats_dir
+    )
+
     batch_size = cfg.train.batch_size
     num_workers = cfg.train.num_workers
 
@@ -372,6 +379,40 @@ def main(cfg: DictConfig):
             
         log.info("\n".join(log_msg))
 
+        # ------ PLOT TRAJECTORY (Every 5 epochs) --------------------------
+        if (epoch + 1) % 5 == 0:
+            figure_dir = os.path.join(output_dir, "figures", f"epoch_{epoch+1}")
+            os.makedirs(figure_dir, exist_ok=True)
+            
+            # Use test_dataset for intermediate plotting to check generalization
+            plot_loader = DataLoader(test_dataset, batch_size=10, shuffle=False)
+            
+            with torch.no_grad():
+                for i, batch in enumerate(plot_loader):
+                    batch = {k: v.to(device) for k, v in batch.items()}
+                    with torch.amp.autocast(enabled=True, device_type=device.type):
+                        results = model(n_steps=test_steps, **batch)
+                    
+                    n_plots = min(10, results['x_traj'].shape[0])
+                    for k in range(n_plots):
+                        x_pred = results['x_traj'][k] 
+                        x_gt = results['x_traj_gt'][k]
+                        
+                        plot_save_path = os.path.join(figure_dir, f"test_plot_{k}.png")
+                        plot_trajectory(
+                            pred_dt=cfg.data.pred_dt,
+                            x_pred=x_pred,
+                            x_gt=x_gt,
+                            angle_indices=cfg.data.angle_indices,
+                            quat_indices=cfg.data.quat_indices,
+                            save_path=plot_save_path,
+                            mean=train_dataset.processor.mean,
+                            std=train_dataset.processor.std
+                        )
+                    break # Only first batch
+            
+            log.info(f"Saved trajectory plots to {figure_dir}")
+
         # ------ SCHEDULER & EARLY STOPPING --------------------------------
         val_total_loss = avg_val_metrics.get("loss/total", float('inf')) 
         if step_per == 'epoch':
@@ -406,12 +447,6 @@ def main(cfg: DictConfig):
     else:
         log.warning(f"Best model not found at {best_model_path}. Using current model weights.")
 
-    test_dataset = hydra.utils.instantiate(
-        cfg.data, 
-        split="test", 
-        train_steps=test_steps,
-        stats_dir=stats_dir
-    )
     test_loader = DataLoader(
         test_dataset, 
         batch_size=cfg.train.batch_size, 
@@ -461,6 +496,9 @@ def main(cfg: DictConfig):
 
     test_loader_plot = DataLoader(test_dataset, batch_size=10, shuffle=False)
     
+    final_figure_dir = os.path.join(output_dir, "figures", "final")
+    os.makedirs(final_figure_dir, exist_ok=True)
+
     with torch.no_grad():
         for i, batch in enumerate(test_loader_plot):
             with torch.amp.autocast(enabled=True, device_type=device.type):
@@ -473,7 +511,7 @@ def main(cfg: DictConfig):
                     x_pred = results['x_traj'][k] 
                     x_gt = results['x_traj_gt'][k]
                     
-                    plot_save_path = os.path.join(output_dir, f"test_plot_{k}.png")
+                    plot_save_path = os.path.join(final_figure_dir, f"test_plot_{k}.png")
                     plot_trajectory(
                         pred_dt=cfg.data.pred_dt,
                         x_pred=x_pred,
