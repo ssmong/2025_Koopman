@@ -10,8 +10,8 @@ weights:
   pred_x: 1.0
   pred_z: 1.0
   recon_z: 0.1
-  veronese_consistency: 0.1 # New
-  spectral: 0.01 # New
+  veronese_consistency: 0.1
+  spectral: 0.01
   isometric: 0.01
 
 targets:
@@ -43,7 +43,7 @@ targets:
     key_pred: z_traj_re
     key_target: z_traj
 
-  # 5. Veronese Consistency (z space)
+  # Veronese Consistency (z space)
   veronese_consistency:
     _target_: src.losses.components.veronese.VeroneseConsistencyLoss
     n_step_max: ${...n_step_max}
@@ -59,9 +59,9 @@ targets:
     veronese_start_dim: 7 # 4(q)+3(w)
     quat_start_dim: 0
     quat_dim: 4
-    scale_off_diagonals: false # False for Version 4 (no sqrt(2))
+    scale_off_diagonals: false
 
-  # 6. Spectral Radius (Stability)
+  # Spectral Radius (Stability)
   spectral:
     _target_: src.losses.components.spectral.SpectralRadiusLoss
     n_step_max: ${...n_step_max}
@@ -74,7 +74,7 @@ targets:
 
     key_A: A_ct # Using Continuous A
     mode: continuous # Re(lambda) <= 0
-    subsample: 32 # Only compute eigenvalues for 32 random samples per batch for speed
+    subsample: 1 # For LTI, A is unique (1, N, N)
 
   isometric:
     _target_: src.losses.components.isometry.IsometryLoss
@@ -93,3 +93,4 @@ targets:
     quat_loss_type: ${...quat_loss_type}
     # Exclude q(0-3), w(4-6), veronese(7-16) -> Total 17 indices to exclude
     exclude_z_idx: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+

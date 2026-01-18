@@ -260,7 +260,7 @@ def main(cfg: DictConfig):
 
             with torch.amp.autocast(enabled=True, device_type=device.type):
                 results = model(n_steps=curr_steps, **batch_gpu)
-                loss, metrics = criterion(results)
+                loss, metrics = criterion(results, epoch=epoch)
 
             loss_val = loss.item()
             
@@ -324,7 +324,7 @@ def main(cfg: DictConfig):
                 
                 with torch.amp.autocast(enabled=True, device_type=device.type):
                     results = model(n_steps=test_steps, **batch)
-                    _, metrics = criterion(results)
+                    _, metrics = criterion(results, epoch=epoch)
                 
                 for k, v in metrics.items():
                     val = v.item() if isinstance(v, torch.Tensor) else v
@@ -466,7 +466,7 @@ def main(cfg: DictConfig):
             
             with torch.amp.autocast(enabled=True, device_type=device.type):
                 results = model(n_steps=test_steps, **batch)
-                _, metrics = criterion(results)
+                _, metrics = criterion(results, epoch=epochs)
             
             for k, v in metrics.items():
                 val = v.item() if isinstance(v, torch.Tensor) else v

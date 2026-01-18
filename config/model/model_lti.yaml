@@ -1,0 +1,37 @@
+_target_: src.models.model_lti.LTIModel
+_recursive_: False
+
+defaults:
+  - lifting: veronese_4
+  - _self_
+
+state_dim: ${data.state_dim}
+control_dim: ${data.control_dim}
+latent_dim: 32
+dt: ${data.pred_dt}
+
+quat_indices: ${data.quat_indices}
+omega_indices: ${data.omega_indices}
+
+# -----------------------------------------------------------------------
+# Decoding Configuration (Override for Veronese)
+# -----------------------------------------------------------------------
+decoding:
+  _target_: src.models.components.block_veronese_4.VeroneseDecoding4
+  _recursive_: False
+  
+  quat_indices: ${..quat_indices}
+  omega_indices: ${..omega_indices}
+  
+  # Reference lifting config params for consistency (Sibling reference)
+  hidden_size: ${..lifting.hidden_size}
+  num_layers: ${..lifting.num_layers}
+  
+  backbone:
+    _target_: src.models.components.block_resnet.ResNetBlock
+    hidden_size: ${..hidden_size}
+    num_layers: ${..num_layers}
+    use_norm: true
+    activation: 
+      _target_: torch.nn.SiLU
+
