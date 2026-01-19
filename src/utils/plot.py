@@ -108,7 +108,7 @@ def plot_trajectory(
         ax.grid(True, alpha=0.3)
         ax.legend(loc='upper right')
 
-    plt.xlabel("Time Step")
+    plt.xlabel("Time (s)")
     plt.tight_layout()
     
     if save_path:
