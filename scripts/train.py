@@ -148,6 +148,19 @@ def main(cfg: DictConfig):
         criterion.bind_model(model)
         criterion.to(device)
     
+    # Log model parameters
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+    log.info("Model Parameter Summary:")
+    log.info(f"  Total Parameters: {total_params:,}")
+    log.info(f"  Trainable Parameters: {trainable_params:,}")
+    
+    log.info("  Component Breakdown:")
+    for name, module in model.named_children():
+        params = sum(p.numel() for p in module.parameters())
+        log.info(f"    {name}: {params:,}")
+
     # Remove duplicates from combined_params
     param_set = set()
     unique_params = []

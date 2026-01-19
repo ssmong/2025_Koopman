@@ -35,7 +35,7 @@ class QuatLoss(BaseLoss):
             diff_minus = (q_pred_unit + q_target_unit).norm(dim=-1)
             quat_loss = torch.min(diff_plus, diff_minus).square() # Use squared distance
         elif self.quat_loss_type == 'angle':
-            safe_eps = 1e-6 
+            safe_eps = 1e-5 
             # Double Cover Handling
             cos_half_theta = (q_pred_unit * q_target_unit).sum(dim=-1).abs()
             
@@ -45,7 +45,7 @@ class QuatLoss(BaseLoss):
             sin_half_theta = torch.sqrt(1.0 - cos_half_theta ** 2 + safe_eps)
             angle_diff = 2.0 * torch.atan2(sin_half_theta, cos_half_theta)
             
-            charb_eps = 1e-3 
+            charb_eps = 1e-5 
             quat_loss = torch.sqrt(angle_diff**2 + charb_eps**2)
         else:
             raise ValueError(f"Unknown quat_loss_type: {self.quat_loss_type}. Supported: ['geodesic', 'chordal']")

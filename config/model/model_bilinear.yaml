@@ -1,17 +1,15 @@
-_target_: src.models.model_lpv_4.LPVModel4
+_target_: src.models.model_bilinear.BilinearModel
 _recursive_: False
 
 defaults:
-  - context: kimi
   - lifting: veronese_4
-  - matrix: linear
   - _self_
 
 state_dim: ${data.state_dim}
 control_dim: ${data.control_dim}
 latent_dim: 32
 dt: ${data.pred_dt}
-noise_std: 0.001 # Latent noise injection std for robust dynamics
+noise_std: 0.1 # Denoising Autoencoder noise level
 
 quat_indices: ${data.quat_indices}
 omega_indices: ${data.omega_indices}
@@ -26,7 +24,6 @@ decoding:
   quat_indices: ${..quat_indices}
   omega_indices: ${..omega_indices}
   
-  # Reference lifting config params for consistency (Sibling reference)
   hidden_size: ${..lifting.hidden_size}
   num_layers: ${..lifting.num_layers}
   
@@ -37,3 +34,4 @@ decoding:
     use_norm: true
     activation: 
       _target_: torch.nn.SiLU
+

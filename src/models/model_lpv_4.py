@@ -28,6 +28,7 @@ class LPVModel4(nn.Module):
                  matrix: DictConfig,
                  decoding: DictConfig = None,
                  dt: float = 0.01,
+                 noise_std: float = 0.0,
                  **kwargs):
         super().__init__()
         
@@ -35,6 +36,7 @@ class LPVModel4(nn.Module):
         self.control_dim = control_dim  
         self.latent_dim = latent_dim
         self.dt = dt
+        self.noise_std = noise_std
         self.quat_indices = list(quat_indices) if quat_indices is not None else []
         self.omega_indices = list(omega_indices) if omega_indices is not None else []
         
@@ -178,8 +180,14 @@ class LPVModel4(nn.Module):
         z_traj = [z_curr]
 
         for k in range(n_steps):
+            # Add Gaussian noise to latent state during training (Robustness/Denoising)
+            z_in = z_curr
+            if self.training and self.noise_std > 0:
+                noise = torch.randn_like(z_curr) * self.noise_std
+                z_in = z_curr + noise
+
             u_k = u_future[:, k, :]
-            z_curr = self._forward_dynamics(z_curr, A_dt, B_flat, u_k)
+            z_curr = self._forward_dynamics(z_in, A_dt, B_flat, u_k)
             z_traj.append(z_curr)
         
         z_traj = torch.stack(z_traj, dim=1)
