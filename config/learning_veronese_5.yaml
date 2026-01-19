@@ -1,0 +1,22 @@
+_recursive_: False
+
+defaults:
+  - data: attitude
+  - model: model_lpv_veronese_5       
+  - loss: loss_veronese_5       
+  - train: train_default
+  - _self_
+
+wandb:
+  project: "2025-koopman"
+  entity: null
+  group: "veronese_5"
+  mode: "online"
+
+hydra:
+  run:
+    dir: outputs/learning/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    dir: outputs/learning/sweep/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra.job.num}
+

@@ -1,4 +1,4 @@
-_target_: src.models.model_lpv_4.LPVModel4
+_target_: src.models.model_lpv_5.LPVModel5
 _recursive_: False
 
 defaults:

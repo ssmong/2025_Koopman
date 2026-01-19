@@ -9,14 +9,14 @@ import hydra
 logger = logging.getLogger(__name__)
 
 """
-Dense LPV Model (V4) - "Unconstrained & Invertible"
+Dense LPV Model (V5) - "Direct Discrete & Residual"
 Reflecting conversation:
 1. z = [q, w, veronese(q), z_nn]
-2. Dynamics: z_{k+1} = Cayley(A_ct) * z_k + B * u_k
-3. A_ct is fully learnable (no skew-symmetric constraints)
-4. Cayley map ensures invertibility and handles large dt better than simple Euler.
+2. Dynamics: z_{k+1} = A_dt * z_k + B * u_k
+3. A_dt is directly learned as Residual: A_dt = I + delta_A
+4. Supports Low-Rank + Diagonal structure
 """
-class LPVModel4(nn.Module):
+class LPVModel5(nn.Module):
     def __init__(self, 
                  state_dim: int, 
                  control_dim: int,
@@ -81,13 +81,13 @@ class LPVModel4(nn.Module):
         
         # 4. Dense Matrix Generation Parameters
         if self.rank > 0:
-            # Low-Rank + Diagonal: A = U*V^T + D
+            # Low-Rank + Diagonal: A = I + (U*V^T + D)
             # Output size: (N*r for U) + (N*r for V) + (N for D)
             self.u_size = self.latent_dim * self.rank
             self.v_size = self.latent_dim * self.rank
             self.d_size = self.latent_dim
             out_features = self.u_size + self.v_size + self.d_size
-            logger.info(f"LPVModel4: Using Low-Rank A (rank={self.rank}) + Diagonal. Output dim: {out_features}")
+            logger.info(f"LPVModel5: Using Low-Rank A (rank={self.rank}) + Diagonal. Output dim: {out_features}")
         else:
             # Full Rank: NxN
             out_features = self.latent_dim * self.latent_dim
@@ -107,7 +107,7 @@ class LPVModel4(nn.Module):
         self._init_weights()
 
     def _init_weights(self):
-        # Initialize A to be near zero -> A_dt near Identity
+        # Initialize delta_A to be near zero -> A_dt near Identity
         def _init_A(module):
             last_layer = list(module.modules())[-1]
             if isinstance(last_layer, nn.Linear):
@@ -115,7 +115,7 @@ class LPVModel4(nn.Module):
                 if last_layer.bias is not None:
                     # Initialize to small random noise to break symmetry, 
                     # but close to 0 to ensure A_dt starts as Identity.
-                    nn.init.normal_(last_layer.bias, mean=0.0, std=1e-4)
+                    nn.init.normal_(last_layer.bias, mean=0.0, std=1e-5)
                     
         def _init_B(module, bias=None):
             last_layer = list(module.modules())[-1]
@@ -131,17 +131,18 @@ class LPVModel4(nn.Module):
         noise = torch.randn(self.latent_dim * self.control_dim) * 1e-5 
         _init_B(self._to_B, bias=noise)
 
-    def get_A_ct(self, h):
+    def get_A_dt(self, h):
         """
-        Reshape output of _to_A into (Batch, N, N).
-        Supports Full Rank or Low-Rank+Diagonal.
+        Reshape output of _to_A into (Batch, N, N) and add Identity.
+        A_dt = I + delta_A
         """
         batch_size = h.size(0)
+        device = h.device
+        
         params = self._to_A(h)
         
         if self.rank > 0:
             # Split params into U, V, D
-            # params: [batch, u_size + v_size + d_size]
             u_flat = params[:, :self.u_size]
             v_flat = params[:, self.u_size : self.u_size + self.v_size]
             d_flat = params[:, self.u_size + self.v_size :]
@@ -150,37 +151,19 @@ class LPVModel4(nn.Module):
             V = v_flat.view(batch_size, self.latent_dim, self.rank)
             
             # Low-rank part: U @ V.T
-            A_low = torch.matmul(U, V.transpose(1, 2))
+            delta_A = torch.matmul(U, V.transpose(1, 2))
             
             # Diagonal part
             D = torch.diag_embed(d_flat)
             
-            return A_low + D
+            delta_A = delta_A + D
         else:
             # Full Rank
-            return params.view(batch_size, self.latent_dim, self.latent_dim)
-
-    def _cayley_map(self, A_ct):
-        """
-        Cayley transform for fast and invertible discretization.
-        A_dt = (I - dt/2 * A_ct)^-1 @ (I + dt/2 * A_ct)
-        Approximates exp(A_ct * dt).
-        """
-        B, N, _ = A_ct.shape
-        dt = self.dt
-        device = A_ct.device
-        I = torch.eye(N, device=device).unsqueeze(0).expand(B, -1, -1)
-        
-        # Terms for Crank-Nicolson / Cayley
-        # T1 = I - 0.5*dt*A
-        # T2 = I + 0.5*dt*A
-        factor = 0.5 * dt * A_ct
-        lhs = I - factor
-        rhs = I + factor
-        
-        # Solve linear system instead of explicit inverse for speed & stability
-        # Solves X such that lhs @ X = rhs
-        A_dt = torch.linalg.solve(lhs, rhs)
+            delta_A = params.view(batch_size, self.latent_dim, self.latent_dim)
+            
+        # Residual Connection: A_dt = I + delta_A
+        I = torch.eye(self.latent_dim, device=device).unsqueeze(0).expand(batch_size, -1, -1)
+        A_dt = I + delta_A
         
         return A_dt
 
@@ -205,12 +188,9 @@ class LPVModel4(nn.Module):
         ctxt = torch.cat([x_history, u_history], dim=-1)
         h, _, _ = self.ctxt_encoder(ctxt)
         
-        # Compute A_continuous and B once (Frozen-time LPV)
-        A_ct = self.get_A_ct(h)
+        # Compute Discrete A directly (Frozen-time LPV)
+        A_dt = self.get_A_dt(h)
         B_flat = self._to_B(h)
-
-        # Compute Discrete A once
-        A_dt = self._cayley_map(A_ct)
 
         z_curr = self.encoder(x_init)
         z_traj = [z_curr]
@@ -239,9 +219,8 @@ class LPVModel4(nn.Module):
         results = {
             "z_traj": z_traj,
             "x_traj": x_traj,
-            "A_ct": A_ct,  # Explicitly return Continuous A
-            "A_dt": A_dt,  # Explicitly return Discrete A
-            "B": B_flat.view(A_ct.size(0), self.latent_dim, self.control_dim),
+            "A_dt": A_dt, 
+            "B": B_flat.view(A_dt.size(0), self.latent_dim, self.control_dim),
             "u_future": u_future,
             "z_traj_re": self.encoder(x_traj) 
         }
@@ -257,13 +236,12 @@ class LPVModel4(nn.Module):
 
     def get_A(self, x_history: torch.Tensor, u_history: torch.Tensor):
         """
-        Returns Discrete-time A matrix using Cayley Map
+        Returns Discrete-time A matrix directly
         """
         ctxt = torch.cat([x_history, u_history], dim=-1)
         h, _, _ = self.ctxt_encoder(ctxt)
         
-        A_ct = self.get_A_ct(h)
-        A_dt = self._cayley_map(A_ct)
+        A_dt = self.get_A_dt(h)
         
         return A_dt
     

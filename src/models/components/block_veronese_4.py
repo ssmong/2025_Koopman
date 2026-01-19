@@ -1,10 +1,12 @@
 import math
 from typing import List, Dict, Optional
-
+import logging
 import torch
 import torch.nn as nn
 import hydra
 import torch.nn.functional as F
+
+logger = logging.getLogger(__name__)
 
 class VeroneseLifting4(nn.Module):
     def __init__(self, 
@@ -90,6 +92,8 @@ class VeroneseDecoding4(nn.Module):
                 in_features=in_features, 
                 out_features=self.nn_out_dim
             )
+        elif self.nn_out_dim > 0 and backbone is None:
+            logger.warning("Backbone is None, but nn_out_dim > 0. Setting backbone to None.")
         else:
             self.backbone = None
             
@@ -125,7 +129,7 @@ class VeroneseDecoding4(nn.Module):
         x_recon[:, self.quat_indices] = q_recon
         x_recon[:, self.omega_indices] = w_recon
         
-        if self.nn_out_dim > 0:
+        if self.nn_out_dim > 0 and self.backbone is not None:
             x_recon[:, self.unknown_indices] = others_pred
         
         return x_recon.view(*original_shape[:-1], -1)
