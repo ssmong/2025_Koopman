@@ -138,7 +138,8 @@ def main(cfg: DictConfig):
             pretrained_dir=pretrained_dir, 
             device=device,
             strict=True,
-            criterion=criterion
+            criterion=criterion,
+            model=model
         )
     else:
         model = hydra.utils.instantiate(cfg.model)

@@ -6,7 +6,7 @@ from omegaconf import DictConfig
 
 log = logging.getLogger(__name__)
 
-def load_finetune_model(cfg: DictConfig, pretrained_dir: str, device: str = "cuda", strict: bool = False, criterion = None):
+def load_finetune_model(cfg: DictConfig, pretrained_dir: str, device: str = "cuda", strict: bool = False, criterion = None, model = None):
     """
     Load model for fine-tuning.
     
@@ -17,13 +17,17 @@ def load_finetune_model(cfg: DictConfig, pretrained_dir: str, device: str = "cud
         device (str): Device to load the model on.
         strict (bool): Strict mode for load_state_dict.
         criterion (torch.nn.Module): Optional criterion to load state_dict into.
+        model (torch.nn.Module): Optional model instance to load weights into.
         
     Returns:
         model: Model with loaded weights.
     """
-    log.info("Initializing model from current configuration for fine-tuning...")
-    model = hydra.utils.instantiate(cfg.model)
-    model.to(device)
+    if model is None:
+        log.info("Initializing model from current configuration for fine-tuning...")
+        model = hydra.utils.instantiate(cfg.model)
+        model.to(device)
+    else:
+        log.info("Using provided model instance for fine-tuning...")
 
     weights_path = os.path.join("outputs", "learning", pretrained_dir, "best_model.pt")
         
