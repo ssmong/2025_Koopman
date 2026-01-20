@@ -35,18 +35,18 @@ class QuatLoss(BaseLoss):
             diff_minus = (q_pred_unit + q_target_unit).norm(dim=-1)
             quat_loss = torch.min(diff_plus, diff_minus).square() # Use squared distance
         elif self.quat_loss_type == 'angle':
-            safe_eps = 1e-5 
-            # Double Cover Handling
+            # Double cover handling
             cos_half_theta = (q_pred_unit * q_target_unit).sum(dim=-1).abs()
-            
-            # Re-introduce clamp for stability
-            cos_half_theta = torch.clamp(cos_half_theta, min=0.0, max=1.0 - safe_eps)
-            
-            sin_half_theta = torch.sqrt(1.0 - cos_half_theta ** 2 + safe_eps)
+            # Keep within valid numerical bounds without enforcing a loss floor
+            cos_half_theta = torch.clamp(cos_half_theta, min=0.0, max=1.0)
+            sin_sq = 1.0 - cos_half_theta ** 2
+            # Avoid negative from numeric error; tiny floor prevents inf gradients
+            sin_sq = torch.clamp(sin_sq, min=1e-12)
+            sin_half_theta = torch.sqrt(sin_sq)
             angle_diff = 2.0 * torch.atan2(sin_half_theta, cos_half_theta)
             
-            charb_eps = 1e-5 
-            quat_loss = torch.sqrt(angle_diff**2 + charb_eps**2)
+            charb_eps = 1e-8
+            quat_loss = torch.sqrt(angle_diff ** 2 + charb_eps ** 2)
         else:
             raise ValueError(f"Unknown quat_loss_type: {self.quat_loss_type}. Supported: ['geodesic', 'chordal']")
 
