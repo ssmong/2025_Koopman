@@ -5,7 +5,7 @@ defaults:
 
 sim_time: 100.0   # [sec]
 sim_dt: 0.01      # [sec] Dynamics integration step
-ctrl_dt: 1        # [sec] Control update step
+ctrl_dt: 0.1        # [sec] Control update step
 log_dt: 0.1       # [sec] Data logging step
 warmup_time: 10.0 # [sec] Wait for history buffer to fill
 

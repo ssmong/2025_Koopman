@@ -52,7 +52,8 @@ from sim.utils.plot import (
     plot_rate_error,
     plot_torque,
     plot_rw_motor_torque,
-    plot_rw_speeds
+    plot_rw_speeds,
+    plot_afz_trajectory
 )
 from sim.utils.bks_utils import normalToDcmF0B
 
@@ -396,7 +397,7 @@ def run(cfg: DictConfig):
     ctl_target = cfg.controller.get("_target_", "RandomTorque")
     
     if "BskKoopmanMPC" in ctl_target:
-        from sim.controller.koopman_mpc import BskKoopmanMPC
+        from sim.controller.bsk_koopman_mpc import BskKoopmanMPC
         
         mpc_params = dict(cfg.controller.mpc_params)
         
@@ -559,8 +560,42 @@ def run(cfg: DictConfig):
             scSim.ConfigureStopTime(currentSimNanos)
             scSim.ExecuteSimulation()
     else:
-        scSim.ConfigureStopTime(simulationTime)
-        scSim.ExecuteSimulation()
+        # Progress Bar & Real-time Monitoring
+        display_dt = cfg.sim.ctrl_dt  # Update display every ctrl_dt (0.1s)
+        display_dt_ns = macros.sec2nano(display_dt)
+        
+        currentSimNanos = 0
+            
+        while currentSimNanos < simulationTime:
+            currentSimNanos += display_dt_ns
+            if currentSimNanos > simulationTime:
+                currentSimNanos = simulationTime
+                
+            scSim.ConfigureStopTime(currentSimNanos)
+            scSim.ExecuteSimulation()
+            
+            att_err_deg = 0.0
+            msgData = attError.attGuidOutMsg.read()
+            sigma_BR = np.array(msgData.sigma_BR)
+            omega_BR_B = np.array(msgData.omega_BR_B)
+            
+            # Angle Error: 4 * arctan(|sigma|)
+            att_err_rad = 4.0 * np.arctan(np.linalg.norm(sigma_BR))
+            att_err_deg = att_err_rad * macros.R2D
+
+            # Quaternion
+            ep_BR = rbk.MRP2EP(sigma_BR)
+
+            # Omega (deg/s)
+            omega_deg_s = omega_BR_B * macros.R2D
+            
+            percent = (currentSimNanos / simulationTime) * 100
+            sys.stdout.write(f"\rSim: {percent:5.1f}% | AngErr: {att_err_deg:6.3f} deg | "
+                             f"Q: [{ep_BR[0]:.3f} {ep_BR[1]:.3f} {ep_BR[2]:.3f} {ep_BR[3]:.3f}] | "
+                             f"w: [{omega_deg_s[0]:.3f} {omega_deg_s[1]:.3f} {omega_deg_s[2]:.3f}] deg/s")
+            sys.stdout.flush()
+
+        print() # Newline after completion
     
     bsk_logger.bskLog(bskLogging.BSK_INFORMATION, "Simulation Finished.")
 
@@ -690,6 +725,14 @@ def run(cfg: DictConfig):
         # Plot 5: RW Speed
         plot_rw_speeds(save_data["time"], save_data["omega_rw"], position=(1100, 500))
         plt.savefig(os.path.join(figureDir, "rw_speed.png"), dpi=150, bbox_inches='tight')
+
+    # Plot 6: AFZ Trajectory (if configured)
+    if "constraint" in cfg:
+        constraint_cfg = OmegaConf.to_container(cfg.constraint, resolve=True)
+        if 'afz_list' in constraint_cfg:
+            boresight_vec = constraint_cfg.get('constraint_cfg', {}).get('boresight_vec', [1, 0, 0])
+            plot_afz_trajectory(save_data["ep_BR"], constraint_cfg['afz_list'], boresight_vec=boresight_vec, position=(900, 500))
+            plt.savefig(os.path.join(figureDir, "afz_trajectory.png"), dpi=150, bbox_inches='tight')
 
     if show_plots:
         plt.show()

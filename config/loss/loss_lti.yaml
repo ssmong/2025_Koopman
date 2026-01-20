@@ -10,7 +10,7 @@ weights:
   pred_x: 1.0
   pred_z: 1.0
   recon_z: 0.1
-  veronese_consistency: 0.1
+  v_cons: 0.1
   spectral: 0.01
   isometric: 0.01
 
@@ -43,12 +43,12 @@ targets:
     key_pred: z_traj_re
     key_target: z_traj
 
-  # Veronese Consistency (z space)
-  veronese_consistency:
+  # 5. Veronese Consistency (z space)
+  v_cons:
     _target_: src.losses.components.veronese.VeroneseConsistencyLoss
     n_step_max: ${...n_step_max}
     weight_decay: ${...decay}
-    weight: ${...weights.veronese_consistency}
+    weight: ${...weights.v_cons}
     
     # Required by BaseLoss
     key_pred: z_traj

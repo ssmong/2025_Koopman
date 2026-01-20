@@ -22,8 +22,22 @@ def load_model(checkpoint_dir: str, device: str = "cuda"):
     log.info(f"Loading model from {weights_path}...")
     model = hydra.utils.instantiate(cfg.model)
     
-    state_dict = torch.load(weights_path, map_location=device, weights_only=True)
-    model.load_state_dict(state_dict)
+    checkpoint = torch.load(weights_path, map_location=device, weights_only=True)
+    
+    # Handle checkpoint dictionary format (new format with 'model' key)
+    if isinstance(checkpoint, dict) and 'model' in checkpoint:
+        state_dict = checkpoint['model']
+    else:
+        state_dict = checkpoint
+
+    # Use strict=False to be robust against minor mismatches, or handle unexpected keys log
+    # For simulation/evaluation, strict=False is often safer if auxiliary keys (like loss params) are present but unused
+    missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=False)
+    
+    if missing_keys:
+        log.warning(f"Missing keys in state_dict (initialized randomly or defaults): {missing_keys}")
+    if unexpected_keys:
+        log.warning(f"Unexpected keys in state_dict (ignored): {unexpected_keys}")
 
     model.to(device)
     model.eval()

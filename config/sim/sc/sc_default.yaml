@@ -13,7 +13,7 @@ orbit:
   f: 117.71       # [deg]
 
 init_attitude:
-  q_BN: [0.648, 0.517, -0.414, 0.376]  # scalar-first quaternion
+  q_BN: [0.3062, 0.4356, -0.6597, -0.5303]  # scalar-first quaternion
   omega_BN_B: [0.0, 0.0, 0.0]
 
 geometry:

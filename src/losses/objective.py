@@ -36,6 +36,10 @@ class Objective(nn.Module):
             total_loss += loss_val
             loss_metrics[f"loss/{name}"] = loss_val.item()
         
+            if hasattr(criterion, 'additional_metrics') and isinstance(criterion.additional_metrics, dict):
+                for k, v in criterion.additional_metrics.items():
+                    loss_metrics[f"loss/{name}_{k}"] = v
+        
         loss_metrics["loss/total"] = total_loss.item()
 
         return total_loss, loss_metrics

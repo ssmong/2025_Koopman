@@ -16,7 +16,8 @@ class KoopmanMPC:
                  Q_diag: list, 
                  R_diag: list,
                  F_diag: list,
-                 rest_ratio: float = 1,
+                 Q_rest: float = 0.01,
+                 F_rest: float = 0.01,
                  constraint_cfg: dict = None,
                  device: str = "cuda"):
         
@@ -61,32 +62,20 @@ class KoopmanMPC:
             log.warning(f"Q_diag dimension {self.Q_np.shape[0]} != latent_dim {self.latent_dim}. Padding with defaults.")
             Q_expanded = np.ones(self.latent_dim)
             Q_expanded[:self.Q_np.shape[0]] = self.Q_np
-            Q_expanded[self.Q_np.shape[0]:] = np.mean(self.Q_np) * rest_ratio 
+            Q_expanded[self.Q_np.shape[0]:] = Q_rest
             self.Q_np = Q_expanded
 
         if self.F_np.shape[0] != self.latent_dim:
              log.warning(f"F_diag dimension {self.F_np.shape[0]} != latent_dim {self.latent_dim}. Padding with defaults.")
              F_expanded = np.ones(self.latent_dim)
              F_expanded[:self.F_np.shape[0]] = self.F_np
-             F_expanded[self.F_np.shape[0]:] = np.mean(self.F_np) * rest_ratio
+             F_expanded[self.F_np.shape[0]:] = F_rest
              self.F_np = F_expanded
              
         # --- Prepare AFZ Constraints ---
         A_constr = None
         if self.constraint_cfg is not None:
             try:
-                if hasattr(self.model.encoder, 'mixing'):
-                    with torch.no_grad():
-                        W = self.model.mixing.get_matrix()
-                        # Ensure W is float32 for inverse if it's float16
-                        if W.dtype == torch.float16:
-                            W = W.float()
-                        W_inv = torch.linalg.inv(W)
-                        W_inv_np = W_inv.cpu().numpy()
-                else:
-                    log.warning("No mixing layer found in model for AFZ constraints. Assuming Identity.")
-                    W_inv_np = np.eye(self.latent_dim)
-                
                 boresight_vec = np.array(self.constraint_cfg['boresight_vec'])
                 afz_list = self.constraint_cfg.get('afz_list', [])
                 
@@ -98,10 +87,12 @@ class KoopmanMPC:
                     M_list.append(M_prime)
                 
                 if M_list:
-                    M_total = np.vstack(M_list) # Shape: (N_zones, 10)
-                    # We only care about the first 10 dimensions of the unmixed state (Veronese part)
-                    W_inv_trunc = W_inv_np[:10, :] # Shape: (10, latent_dim)
-                    A_constr = M_total @ W_inv_trunc # Shape: (N_zones, latent_dim)
+                    M_total = np.vstack(M_list)  # Shape: (N_zones, 10)
+                    
+                    # Veronese part is at indices 7 to 17 (0-based) -> 7:17
+                    # z = [q(4) | w(3) | veronese(10) | nn_feature(...)],
+                    A_constr = np.zeros((M_total.shape[0], self.latent_dim))
+                    A_constr[:, 7:17] = M_total
                     log.info(f"Initialized AFZ constraints with {len(M_list)} zones.")
             except Exception as e:
                  log.error(f"Failed to initialize AFZ constraints: {e}")

@@ -14,6 +14,7 @@ from sim.controller.koopman_mpc import KoopmanMPC
 from sim.utils.load import load_model
 from sim.utils.profiler import ControllerProfiler
 
+logger = logging.getLogger(__name__)
 
 class BskKoopmanMPC(sysModel.SysModel):
     def __init__(
@@ -48,7 +49,7 @@ class BskKoopmanMPC(sysModel.SysModel):
 
         pred_dt = self.prev_cfg.data.pred_dt
         if pred_dt != ctrl_dt:
-            self.bskLogger.bskLog(bskLogging.BSK_WARNING, f"pred_dt ({pred_dt}) != ctrl_dt ({ctrl_dt}). This will cause unexpected control behavior.")
+            logger.warning(f"pred_dt ({pred_dt}) != ctrl_dt ({ctrl_dt}). This will cause unexpected control behavior.")
         self.hist_len = self.prev_cfg.data.hist_len
         self.hist_dt = self.prev_cfg.data.hist_dt
         self.control_dim = self.prev_cfg.data.control_dim
@@ -79,7 +80,7 @@ class BskKoopmanMPC(sysModel.SysModel):
         
         self.profiler = ControllerProfiler(skip_first=True)
 
-        self.bskLogger.bskLog(bskLogging.BSK_INFORMATION, f"Basilisk Koopman MPC initialized successfully from {checkpoint_dir}")
+        logger.info(f"Basilisk Koopman MPC initialized successfully from {checkpoint_dir}")
 
     def set_warmup_time(self, time: float):
         self.warmup_time = time
