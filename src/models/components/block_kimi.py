@@ -1,9 +1,10 @@
 import torch
 import torch.nn as nn
-from typing import Dict, Any
+from typing import Dict, Any, Optional, List, Tuple
 
 from fla.models.kda.configuration_kda import KDAConfig
 from fla.models.kda.modeling_kda import KDAPreTrainedModel, KDABlock
+from fla.models.utils import Cache
 
 from src.models.components.block_mla import MLABlock
 
@@ -61,6 +62,10 @@ class KimiBlock(KDAPreTrainedModel):
         hidden_states = self.input_proj(hidden_states)
         all_attentions = () if output_attentions else None
         
+        # Initialize fla Cache if starting fresh
+        if use_cache and past_key_values is None:
+            past_key_values = Cache()
+
         for layer in self.layers:
             layer_outputs = layer(
                 hidden_states,

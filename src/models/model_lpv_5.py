@@ -10,11 +10,6 @@ logger = logging.getLogger(__name__)
 
 """
 Dense LPV Model (V5) - "Direct Discrete & Residual"
-Reflecting conversation:
-1. z = [q, w, veronese(q), z_nn]
-2. Dynamics: z_{k+1} = A_dt * z_k + B * u_k
-3. A_dt is directly learned as Residual: A_dt = I + delta_A
-4. Supports Low-Rank + Diagonal structure
 """
 class LPVModel5(nn.Module):
     def __init__(self, 
@@ -254,3 +249,18 @@ class LPVModel5(nn.Module):
         B = B_flat.view(batch_size, self.latent_dim, self.control_dim)
 
         return B
+
+    def get_dynamics_step(self, x_step: torch.Tensor, u_step: torch.Tensor, past_key_values=None):
+        ctxt = torch.cat([x_step, u_step], dim=-1)
+        # Ensure ctxt has time dimension [Batch, 1, Dim]
+        if ctxt.dim() == 2:
+            ctxt = ctxt.unsqueeze(1)
+            
+        h, new_past_key_values, _ = self.ctxt_encoder(ctxt, past_key_values=past_key_values, use_cache=True)
+        
+        A_dt = self.get_A_dt(h)
+        B_flat = self._to_B(h)
+        B = B_flat.view(h.size(0), self.latent_dim, self.control_dim)
+        
+        return A_dt, B, new_past_key_values
+
