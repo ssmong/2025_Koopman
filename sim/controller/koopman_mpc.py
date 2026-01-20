@@ -19,6 +19,7 @@ class KoopmanMPC:
                  Q_rest: float = 0.01,
                  F_rest: float = 0.01,
                  constraint_cfg: dict = None,
+                 solver_max_iter: int = 100,
                  device: str = "cuda"):
         
         self.model = model
@@ -28,6 +29,7 @@ class KoopmanMPC:
         self.latent_dim = model.latent_dim
         self.control_dim = model.control_dim
         self.constraint_cfg = constraint_cfg
+        self.solver_max_iter = solver_max_iter
         
         u_min_phys = np.full(self.control_dim, u_min)
         u_max_phys = np.full(self.control_dim, u_max)
@@ -73,7 +75,7 @@ class KoopmanMPC:
              self.F_np = F_expanded
              
         # --- Prepare AFZ Constraints ---
-        A_constr = None
+        self.A_constr = None
         if self.constraint_cfg is not None:
             try:
                 boresight_vec = np.array(self.constraint_cfg['boresight_vec'])
@@ -91,8 +93,8 @@ class KoopmanMPC:
                     
                     # Veronese part is at indices 7 to 17 (0-based) -> 7:17
                     # z = [q(4) | w(3) | veronese(10) | nn_feature(...)],
-                    A_constr = np.zeros((M_total.shape[0], self.latent_dim))
-                    A_constr[:, 7:17] = M_total
+                    self.A_constr = np.zeros((M_total.shape[0], self.latent_dim))
+                    self.A_constr[:, 7:17] = M_total
                     log.info(f"Initialized AFZ constraints with {len(M_list)} zones.")
             except Exception as e:
                  log.error(f"Failed to initialize AFZ constraints: {e}")
@@ -112,8 +114,8 @@ class KoopmanMPC:
             constraints.append(self.u[k] <= self.u_max_norm)
             
             # Apply AFZ constraints
-            if A_constr is not None:
-                constraints.append(A_constr @ self.z[k+1] <= 2)
+            if self.A_constr is not None:
+                constraints.append(self.A_constr @ self.z[k+1] <= 2)
             
         self.prob = cp.Problem(cp.Minimize(cost), constraints)
 
@@ -162,6 +164,32 @@ class KoopmanMPC:
         self.A_dyn.value = A_val.float().cpu().numpy()
         self.B_dyn.value = B_val.float().cpu().numpy()
 
+        # Check AFZ violation for current state
+        if self.A_constr is not None:
+            # Check violation (allow small numerical tolerance)
+            # AFZ constraint is A_constr @ z <= 2. Violation is > 2.
+            if np.any(self.A_constr @ z_curr > 2.0 + 1e-2):
+                log.warning("Current state violates AFZ constraints. Using fallback strategy (previous plan).")
+                if self.prev_u_seq is not None:
+                    # Use the next step from the previous plan
+                    # prev_u_seq[0] was the control for the previous step.
+                    # prev_u_seq[1] is the control for the current step planned previously.
+                    u_next = self.prev_u_seq[1]
+                    
+                    # Shift sequences for next iteration
+                    self.prev_u_seq = np.vstack([self.prev_u_seq[1:], self.prev_u_seq[-1:]])
+                    if self.prev_z_seq is not None:
+                         self.prev_z_seq = np.vstack([self.prev_z_seq[1:], self.prev_z_seq[-1:]])
+                    
+                    # Update cache/state vars if needed or just return
+                    # We might want to update self.u.value so it reflects what we "chose" 
+                    # but self.u is a CVXPY variable, setting its value doesn't persist across solves unless we use it for warm start.
+                    # We updated self.prev_u_seq, which is used for warm start next time.
+                    
+                    return u_next
+                else:
+                    log.warning("No previous solution available for fallback. Attempting to solve.")
+
         if self.prev_z_seq is not None:
             self.z.value = np.vstack([self.prev_z_seq[1:], self.prev_z_seq[-1:]])
             self.u.value = np.vstack([self.prev_u_seq[1:], self.prev_u_seq[-1:]])
@@ -175,15 +203,28 @@ class KoopmanMPC:
                 warm_start=True,
                 eps_abs=1e-3,
                 eps_rel=1e-3,
+                max_iter=self.solver_max_iter,
                 adaptive_rho=True,
                 polish=False,
                 verbose=False
             )
             self.last_solver_time = self.prob.solver_stats.solve_time
             
+            # Check if solver status is optimal
+            if self.prob.status not in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
+                 log.warning(f"Solver status: {self.prob.status}. Returning previous plan if available.")
+                 if self.prev_u_seq is not None:
+                     u_next = self.prev_u_seq[1]
+                     # Shift sequences
+                     self.prev_u_seq = np.vstack([self.prev_u_seq[1:], self.prev_u_seq[-1:]])
+                     if self.prev_z_seq is not None:
+                         self.prev_z_seq = np.vstack([self.prev_z_seq[1:], self.prev_z_seq[-1:]])
+                     return u_next
+                 else:
+                     return np.zeros(self.control_dim)
                 
-        except cp.SolverError:
-            log.error("Solver error in Koopman MPC: cp.SolverError")
+        except cp.SolverError as e:
+            log.error(f"Solver error in Koopman MPC: {e}")
             return np.zeros(self.control_dim)
             
         if self.u.value is None:
