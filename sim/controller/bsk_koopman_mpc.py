@@ -133,10 +133,23 @@ class BskKoopmanMPC(sysModel.SysModel):
         ep_BR = rbk.MRP2EP(sigma_BR)
 
         x_curr = np.concatenate([ep_BR, omega_BR_B])
+        
+        # Debugging: Check raw state
+        if np.isnan(x_curr).any() or np.isinf(x_curr).any():
+            msg = f"NaN or Inf detected in RAW state vector at time {current_time_sec:.3f}s. Stopping simulation."
+            self.bskLogger.bskLog(bskLogging.BSK_ERROR, msg)
+            raise RuntimeError(msg)
+
         x_curr_norm = self.processor.normalize_state(x_curr, is_expanded=False)
         
         if isinstance(x_curr_norm, torch.Tensor):
             x_curr_norm = x_curr_norm.detach().cpu().numpy()
+
+        # Debugging: Check normalized state
+        if np.isnan(x_curr_norm).any() or np.isinf(x_curr_norm).any():
+             msg = f"NaN or Inf detected in NORMALIZED state at time {current_time_sec:.3f}s.\nOriginal: {x_curr}\nNormalized: {x_curr_norm}"
+             self.bskLogger.bskLog(bskLogging.BSK_ERROR, msg)
+             raise RuntimeError(msg)
         
         # --- Update History (Always based on history time step) ---
         if self.last_hist_update_time < 0 or (current_time_sec - self.last_hist_update_time) >= self.hist_dt - 1e-6:

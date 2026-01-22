@@ -1,3 +1,4 @@
 _target_: sim.setup.sloshing.MPBMSloshing
 mass_init: 100.0
-
+radius_tank: 0.5
+r_TB_B: [0.0, 0.0, 0.0]

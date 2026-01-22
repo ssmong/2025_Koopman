@@ -303,7 +303,42 @@ def run(cfg: DictConfig):
         tank.r_TB_B = [[r_TB_B[0]], [r_TB_B[1]], [r_TB_B[2]]]
         
     elif "MPBMSloshing" in target_class:
-        raise NotImplementedError("MPBM Sloshing is not implemented yet in run_sim_temp.py")
+        bsk_logger.bskLog(bskLogging.BSK_INFORMATION, f"Sloshing Model: MPBMSloshing")
+        try:
+            from Basilisk.ExternalModules import movingPulsatingBall
+        except ImportError:
+            bsk_logger.bskLog(bskLogging.BSK_ERROR, "MPBM module not found. Ensure it is compiled/installed.")
+            raise
+
+        scSim.mpbm = movingPulsatingBall.MovingPulsatingBall()
+        scSim.mpbm.ModelTag = "mpbm"
+        scSim.mpbm.massInit = slosh_cfg.mass_init
+        scSim.mpbm.radiusTank = slosh_cfg.radius_tank
+        # [Alignment] Tank Center = Body Center
+        r_TB_B = slosh_cfg.r_TB_B
+        scSim.mpbm.r_TB_B = [[r_TB_B[0]], [r_TB_B[1]], [r_TB_B[2]]]
+
+        # [Random Initialization]
+        # Position: Inside tank (random direction, magnitude < 0.2m)
+        r_dir = np.random.normal(0, 1, 3)
+        r_dir /= np.linalg.norm(r_dir)
+        r_mag = np.random.uniform(0.0, 0.2)
+        r_init = r_dir * r_mag
+        scSim.mpbm.r_Init_B = [[r_init[0]], [r_init[1]], [r_init[2]]]
+
+        # Velocity: Random velocity within [-0.1, 0.1] m/s
+        v_init = np.random.uniform(-0.1, 0.1, 3)
+        scSim.mpbm.v_Init_B = [[v_init[0]], [v_init[1]], [v_init[2]]]
+
+        # Omega: Random angular velocity within [-0.2, 0.2] rad/s
+        # This ensures initial spin/tumble exists in all axes including Z
+        omega_init = np.random.uniform(-0.2, 0.2, 3)
+        scSim.mpbm.omega_Init_B = [[omega_init[0]], [omega_init[1]], [omega_init[2]]]
+
+        scObject.addStateEffector(scSim.mpbm)
+        scSim.AddModelToTask(simTaskName, scSim.mpbm)
+
+        tankModel.propMassInit = 0.0
         
     else:
         bsk_logger.bskLog(bskLogging.BSK_WARNING, f"Unknown Sloshing target: {target_class}. Defaulting to NoSloshing.")
@@ -416,13 +451,6 @@ def run(cfg: DictConfig):
                 if 'afz_list' in constraint_cfg:
                     ctrl_constr['afz_list'] = constraint_cfg['afz_list']
                 mpc_params['constraint_cfg'] = ctrl_constr
-
-        # NOTE: Run this task at 0.1s (history update rate).
-        # Internal logic handles 1s control update.
-        hist_dt = 0.1 # This should match history dt in training data
-        histTaskName = "histCtrlTask"
-        histTimeStep = macros.sec2nano(hist_dt)
-        dynProcess.addTask(scSim.CreateNewTask(histTaskName, histTimeStep))
             
         torqueControl = BskKoopmanMPC(
             checkpoint_dir=cfg.controller.checkpoint_dir,
@@ -431,6 +459,12 @@ def run(cfg: DictConfig):
             device=cfg.controller.get("device", "cpu")
         )
         torqueControl.ModelTag = "KoopmanMPC"
+        
+        hist_dt = torqueControl.hist_dt # Load from model config
+        histTaskName = "histCtrlTask"
+        histTimeStep = macros.sec2nano(hist_dt)
+        dynProcess.addTask(scSim.CreateNewTask(histTaskName, histTimeStep))
+        
         scSim.AddModelToTask(histTaskName, torqueControl)
         
         if hasattr(torqueControl, 'set_warmup_time'):
@@ -578,6 +612,12 @@ def run(cfg: DictConfig):
             msgData = attError.attGuidOutMsg.read()
             sigma_BR = np.array(msgData.sigma_BR)
             omega_BR_B = np.array(msgData.omega_BR_B)
+
+            # Check for NaN/Inf
+            if np.isnan(sigma_BR).any() or np.isinf(sigma_BR).any() or \
+               np.isnan(omega_BR_B).any() or np.isinf(omega_BR_B).any():
+                bsk_logger.bskLog(bskLogging.BSK_ERROR, f"NaN or Inf detected in simulation state at {currentSimNanos*1e-9:.3f}s. Stopping simulation.")
+                break
             
             # Angle Error: 4 * arctan(|sigma|)
             att_err_rad = 4.0 * np.arctan(np.linalg.norm(sigma_BR))

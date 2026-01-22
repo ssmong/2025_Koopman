@@ -399,31 +399,35 @@ def main(cfg: DictConfig):
             os.makedirs(figure_dir, exist_ok=True)
             
             # Use test_dataset for intermediate plotting to check generalization
-            plot_loader = DataLoader(test_dataset, batch_size=10, shuffle=False)
+            # Use batch_size=1 and multiple batches to get diverse samples
+            plot_loader = DataLoader(test_dataset, batch_size=1, shuffle=True)
             
             with torch.no_grad():
+                plot_count = 0
                 for i, batch in enumerate(plot_loader):
+                    if plot_count >= 10:
+                        break
+                        
                     batch = {k: v.to(device) for k, v in batch.items()}
                     with torch.amp.autocast(enabled=True, device_type=device.type):
                         results = model(n_steps=test_steps, **batch)
                     
-                    n_plots = min(10, results['x_traj'].shape[0])
-                    for k in range(n_plots):
-                        x_pred = results['x_traj'][k] 
-                        x_gt = results['x_traj_gt'][k]
-                        
-                        plot_save_path = os.path.join(figure_dir, f"test_plot_{k}.png")
-                        plot_trajectory(
-                            pred_dt=cfg.data.pred_dt,
-                            x_pred=x_pred,
-                            x_gt=x_gt,
-                            angle_indices=cfg.data.angle_indices,
-                            quat_indices=cfg.data.quat_indices,
-                            save_path=plot_save_path,
-                            mean=train_dataset.processor.mean,
-                            std=train_dataset.processor.std
-                        )
-                    break # Only first batch
+                    # Batch size is 1, so take the 0-th element
+                    x_pred = results['x_traj'][0] 
+                    x_gt = results['x_traj_gt'][0]
+                    
+                    plot_save_path = os.path.join(figure_dir, f"test_plot_{plot_count}.png")
+                    plot_trajectory(
+                        pred_dt=cfg.data.pred_dt,
+                        x_pred=x_pred,
+                        x_gt=x_gt,
+                        angle_indices=cfg.data.angle_indices,
+                        quat_indices=cfg.data.quat_indices,
+                        save_path=plot_save_path,
+                        mean=train_dataset.processor.mean,
+                        std=train_dataset.processor.std
+                    )
+                    plot_count += 1
             
             log.info(f"Saved trajectory plots to {figure_dir}")
 
@@ -508,38 +512,40 @@ def main(cfg: DictConfig):
     log.info("\n".join(log_msg))
     log.info("Training and Testing Completed.")
 
-    test_loader_plot = DataLoader(test_dataset, batch_size=10, shuffle=False)
+    test_loader_plot = DataLoader(test_dataset, batch_size=1, shuffle=True)
     
     final_figure_dir = os.path.join(output_dir, "figures", "final")
     os.makedirs(final_figure_dir, exist_ok=True)
 
     with torch.no_grad():
+        plot_count = 0
         for i, batch in enumerate(test_loader_plot):
+            if plot_count >= 10:
+                break
+                
             with torch.amp.autocast(enabled=True, device_type=device.type):
                 batch = {k: v.to(device) for k, v in batch.items()}
                 results = model(n_steps=test_steps, **batch)
             
-            if i == 0:
-                n_plots = 10
-                for k in range(n_plots):
-                    x_pred = results['x_traj'][k] 
-                    x_gt = results['x_traj_gt'][k]
-                    
-                    plot_save_path = os.path.join(final_figure_dir, f"test_plot_{k}.png")
-                    plot_trajectory(
-                        pred_dt=cfg.data.pred_dt,
-                        x_pred=x_pred,
-                        x_gt=x_gt,
-                        angle_indices=cfg.data.angle_indices,
-                        quat_indices=cfg.data.quat_indices,
-                        save_path=plot_save_path,
-                        mean=train_dataset.processor.mean,
-                        std=train_dataset.processor.std
-                    )
-                    
-                    wandb.log({f"test/trajectory_plot_{k}": wandb.Image(plot_save_path)})
-                    log.info(f"Test plot {k} uploaded to WandB and saved to {plot_save_path}")
-                break
+            # Batch size is 1
+            x_pred = results['x_traj'][0] 
+            x_gt = results['x_traj_gt'][0]
+            
+            plot_save_path = os.path.join(final_figure_dir, f"test_plot_{plot_count}.png")
+            plot_trajectory(
+                pred_dt=cfg.data.pred_dt,
+                x_pred=x_pred,
+                x_gt=x_gt,
+                angle_indices=cfg.data.angle_indices,
+                quat_indices=cfg.data.quat_indices,
+                save_path=plot_save_path,
+                mean=train_dataset.processor.mean,
+                std=train_dataset.processor.std
+            )
+            
+            wandb.log({f"test/trajectory_plot_{plot_count}": wandb.Image(plot_save_path)})
+            log.info(f"Test plot {plot_count} uploaded to WandB and saved to {plot_save_path}")
+            plot_count += 1
 
     wandb.finish()
 
